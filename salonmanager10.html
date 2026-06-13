@@ -2858,9 +2858,13 @@ function sbParseDetailCSV(text) {
     }
   });
 
-  // 出勤日数マップに変換
-  const workDaysMap = {};
-  Object.entries(workDaySet).forEach(([name, set]) => { workDaysMap[name] = set.size; });
+  // 出勤日数マップに変換（日付配列も保持）
+  const workDaysMap   = {};
+  const workDayDates  = {}; // { staffName: ['2026-06-01', ...] }
+  Object.entries(workDaySet).forEach(([name, set]) => {
+    workDaysMap[name]  = set.size;
+    workDayDates[name] = [...set];
+  });
 
   // 未マッピングのスタッフ名を検出
   const csvStaffNames = [...new Set(
@@ -2868,7 +2872,7 @@ function sbParseDetailCSV(text) {
   )];
   const unmapped = detectUnmappedStaff(csvStaffNames);
 
-  return { ok:true, workDaysMap, staffTotals, daily, totalAmt, rowCount:rows.length, headers, ci, csvStaffNames, unmapped };
+  return { ok:true, workDaysMap, workDayDates, staffTotals, daily, totalAmt, rowCount:rows.length, headers, ci, csvStaffNames, unmapped };
 }
 
 // スタッフ別集計CSVパース
@@ -2980,17 +2984,30 @@ function salesReadFile(file) {
     document.getElementById('sales-error-msg').textContent = '先に「対象月」を選択してください。';
     return;
   }
+  const showErr = (msg) => {
+    document.getElementById('sales-error').style.display = 'block';
+    document.getElementById('sales-error-msg').textContent = msg;
+  };
   const tryRead = (encoding) => {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target.result;
-      if (encoding === 'UTF-8' && (text.match(/\uFFFD/g)||[]).length > 5) {
-        tryRead('Shift-JIS');
-        return;
-      }
-      salesProcessCSV(text, month, file.name);
-    };
-    reader.readAsText(file, encoding);
+    try {
+      const reader = new FileReader();
+      reader.onerror = () => showErr('ファイルの読み込みに失敗しました: ' + (reader.error?.message || '不明なエラー'));
+      reader.onload = (ev) => {
+        try {
+          const text = ev.target.result;
+          if (encoding === 'UTF-8' && (text.match(/\uFFFD/g)||[]).length > 5) {
+            tryRead('Shift-JIS');
+            return;
+          }
+          salesProcessCSV(text, month, file.name);
+        } catch(err) {
+          showErr('CSV処理エラー: ' + err.message);
+        }
+      };
+      reader.readAsText(file, encoding);
+    } catch(err) {
+      showErr('読み込み開始エラー: ' + err.message);
+    }
   };
   tryRead('UTF-8');
 }
@@ -3002,44 +3019,70 @@ let _pendingSummaryMonth  = null;
 
 // ===== 売上明細CSV =====
 function salesProcessCSV(text, month, filename) {
-  const result = sbParseDetailCSV(text);
-  if (!result.ok) {
+  try {
+    const result = sbParseDetailCSV(text);
+    if (!result.ok) {
+      document.getElementById('sales-error').style.display = 'block';
+      document.getElementById('sales-error-msg').textContent = result.error;
+      return;
+    }
+    _pendingDetailResult = result;
+    _pendingDetailMonth  = month;
+    if (result.unmapped.length > 0) {
+      openStaffMapModal(result.unmapped, 'detail', filename);
+    } else {
+      commitDetailCSV(month, result, filename);
+    }
+  } catch(err) {
     document.getElementById('sales-error').style.display = 'block';
-    document.getElementById('sales-error-msg').textContent = result.error;
-    return;
-  }
-  _pendingDetailResult = result;
-  _pendingDetailMonth  = month;
-
-  if (result.unmapped.length > 0) {
-    openStaffMapModal(result.unmapped, 'detail', filename);
-  } else {
-    commitDetailCSV(month, result, filename);
+    document.getElementById('sales-error-msg').textContent = '処理エラー: ' + err.message + '\n' + (err.stack||'').split('\n')[1];
   }
 }
 
 function commitDetailCSV(month, result, filename) {
   const ym = month;
-  // 日別売上をdb.salesへ保存
-  db.sales = db.sales.filter(s => !(s.date && s.date.startsWith(ym) && s.source === 'csv'));
+
+  // 日別売上：CSVに含まれる日付だけ削除して再登録（累積対応）
   if (Object.keys(result.daily).length > 0) {
+    const datesInCsv = new Set(Object.keys(result.daily));
+    db.sales = db.sales.filter(s => !(datesInCsv.has(s.date) && s.source === 'csv'));
     Object.entries(result.daily).forEach(([date, amount]) => {
       db.sales.push({ id:uid(), date, amount, memo:'サロンボードCSV', source:'csv' });
     });
   } else if (result.totalAmt > 0) {
+    // 日付列なし → 月計1件（従来通り月全体を置き換え）
+    db.sales = db.sales.filter(s => !(s.date && s.date.startsWith(ym) && s.source === 'csv'));
     db.sales.push({ id:uid(), date:`${ym}-01`, amount:result.totalAmt, memo:'サロンボードCSV（月計）', source:'csv' });
   }
-  // 出勤日数を保存
+
+  // 出勤日数：日付セット単位で累積（日報を毎日読み込んでも重複しない）
   if (!db.salesDetail) db.salesDetail = {};
-  db.salesDetail[ym] = result.workDaysMap;
+  const rawKey     = `${ym}_dates`; // 日付セット保持用キー
+  const existingDates = db.salesDetail[rawKey] || {}; // { staffName: ['2026-06-01',...] }
+  const mergedDates   = JSON.parse(JSON.stringify(existingDates));
+  Object.entries(result.workDayDates || {}).forEach(([name, dates]) => {
+    if (!mergedDates[name]) mergedDates[name] = [];
+    mergedDates[name] = [...new Set([...mergedDates[name], ...dates])];
+  });
+  db.salesDetail[rawKey] = mergedDates;
+  // ユニーク日付数を出勤日数として保存
+  const finalWorkDays = {};
+  Object.entries(mergedDates).forEach(([name, dates]) => { finalWorkDays[name] = dates.length; });
+  // 既存スタッフ（今回CSVにいないスタッフ）も維持
+  const prevDays = db.salesDetail[ym] || {};
+  Object.entries(prevDays).forEach(([name, days]) => {
+    if (!finalWorkDays[name]) finalWorkDays[name] = days;
+  });
+  db.salesDetail[ym] = finalWorkDays;
   saveDB();
 
   // バナー表示
+  const csvDaysCount    = Object.keys(result.daily).length;
+  const totalDaysLoaded = db.sales.filter(s=>s.date?.startsWith(ym)&&s.source==='csv').length;
   const banner = document.getElementById('sales-detail-banner');
   banner.style.cssText = 'display:flex;background:linear-gradient(135deg,#e8f8ec,#d4f4da);border:1.5px solid #a8e0b0;border-radius:9px;padding:10px 14px;margin-top:10px;align-items:center;gap:10px;font-size:.8rem';
-  banner.innerHTML = `<span style="font-size:1.4rem">✅</span><div><b style="color:#1b5e20">${esc(filename)}</b> を読み込みました<br><span style="color:#2e7d32">${result.rowCount}行・出勤日数を${Object.keys(result.workDaysMap).length}名分取得</span></div>`;
+  banner.innerHTML = `<span style="font-size:1.4rem">✅</span><div><b style="color:#1b5e20">${esc(filename)}</b> を追加しました<br><span style="color:#2e7d32">今回 ${csvDaysCount}日分 追加 → ${ym} 累計 ${totalDaysLoaded}日分</span></div>`;
 
-  // 既存のsales-summaryは維持・スタッフ別実績を再描画
   renderSalesStaffCards(month);
   renderHome();
 }
@@ -3070,37 +3113,56 @@ function salesSumFileSelected(e) {
 function salesSumReadFile(file) {
   const month = document.getElementById('sales-target-month').value;
   if (!month) { alert('先に「対象月」を選択してください。'); return; }
+  const showErr = (msg) => {
+    document.getElementById('sales-error').style.display = 'block';
+    document.getElementById('sales-error-msg').textContent = msg;
+  };
   const tryRead = (enc) => {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target.result;
-      if (enc==='UTF-8' && (text.match(/\uFFFD/g)||[]).length > 5) { tryRead('Shift-JIS'); return; }
-      salesSumProcessCSV(text, month, file.name);
-    };
-    reader.readAsText(file, enc);
+    try {
+      const reader = new FileReader();
+      reader.onerror = () => showErr('ファイル読み込みエラー: ' + (reader.error?.message || '不明'));
+      reader.onload = (ev) => {
+        try {
+          const text = ev.target.result;
+          if (enc==='UTF-8' && (text.match(/\uFFFD/g)||[]).length > 5) { tryRead('Shift-JIS'); return; }
+          salesSumProcessCSV(text, month, file.name);
+        } catch(err) {
+          showErr('CSV処理エラー: ' + err.message);
+        }
+      };
+      reader.readAsText(file, enc);
+    } catch(err) {
+      showErr('読み込み開始エラー: ' + err.message);
+    }
   };
   tryRead('UTF-8');
 }
 function salesSumProcessCSV(text, month, filename) {
-  const result = sbParseSummaryCSV(text);
-  if (!result.ok) {
+  try {
+    const result = sbParseSummaryCSV(text);
+    if (!result.ok) {
+      document.getElementById('sales-error').style.display = 'block';
+      document.getElementById('sales-error-msg').textContent = result.error;
+      return;
+    }
+    _pendingSummaryResult = result;
+    _pendingSummaryMonth  = month;
+    if (result.unmapped.length > 0) {
+      openStaffMapModal(result.unmapped, 'summary', filename);
+    } else {
+      commitSummaryCSV(month, result, filename);
+    }
+  } catch(err) {
     document.getElementById('sales-error').style.display = 'block';
-    document.getElementById('sales-error-msg').textContent = result.error;
-    return;
-  }
-  _pendingSummaryResult = result;
-  _pendingSummaryMonth  = month;
-
-  if (result.unmapped.length > 0) {
-    openStaffMapModal(result.unmapped, 'summary', filename);
-  } else {
-    commitSummaryCSV(month, result, filename);
+    document.getElementById('sales-error-msg').textContent = '処理エラー: ' + err.message + '\n' + (err.stack||'').split('\n')[1];
   }
 }
 
 function commitSummaryCSV(month, result, filename) {
   if (!db.staffSummary) db.staffSummary = {};
-  db.staffSummary[month] = result.summaryMap;
+  // スタッフ単位でマージ（既存データを上書きしない・新規データを追加）
+  const existing = db.staffSummary[month] || {};
+  db.staffSummary[month] = { ...existing, ...result.summaryMap };
   saveDB();
 
   // バナー表示
@@ -3216,12 +3278,17 @@ function saveStaffMap() {
 
   // マッピング適用後にコミット
   if (_pendingMapType === 'detail' && _pendingDetailResult) {
-    // workDaysMappを再解決
-    const newWorkDays = {};
+    // workDaysMap と workDayDates を再解決
+    const newWorkDays  = {};
+    const newWorkDates = {};
     Object.entries(_pendingDetailResult.workDaysMap).forEach(([k,v]) => {
       newWorkDays[resolveStaffName(k)] = v;
     });
-    _pendingDetailResult.workDaysMap = newWorkDays;
+    Object.entries(_pendingDetailResult.workDayDates || {}).forEach(([k,v]) => {
+      newWorkDates[resolveStaffName(k)] = v;
+    });
+    _pendingDetailResult.workDaysMap  = newWorkDays;
+    _pendingDetailResult.workDayDates = newWorkDates;
     commitDetailCSV(_pendingDetailMonth, _pendingDetailResult, _pendingMapFilename);
   } else if (_pendingMapType === 'summary' && _pendingSummaryResult) {
     // summaryMapを再解決
@@ -3240,7 +3307,7 @@ function salesClearData() {
   if (!month) return;
   if (!confirm(`${month}のCSV読み込みデータを消去しますか？`)) return;
   db.sales = db.sales.filter(s => !(s.date && s.date.startsWith(month) && s.source === 'csv'));
-  if (db.salesDetail)  delete db.salesDetail[month];
+  if (db.salesDetail)  { delete db.salesDetail[month]; delete db.salesDetail[`${month}_dates`]; }
   if (db.staffSummary) delete db.staffSummary[month];
   saveDB();
   document.getElementById('sales-summary').style.display       = 'none';
@@ -3300,6 +3367,16 @@ function salesInitMonth() {
   if (el && !el.value) {
     const now = new Date();
     el.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  }
+  // 既存データがあればスタッフ別実績を描画
+  const month = el?.value;
+  if (month) {
+    const hasSummary = db.staffSummary && db.staffSummary[month] && Object.keys(db.staffSummary[month]).length > 0;
+    const hasDetail  = db.salesDetail  && db.salesDetail[month]  && Object.keys(db.salesDetail[month]).length > 0;
+    if (hasSummary || hasDetail) {
+      renderSalesStaffCards(month);
+      document.getElementById('sales-staff-card').style.display = 'block';
+    }
   }
 }
 const BANK_OUT_KW  = ['出金金額','支払金額','出金額','引出金額','支払額','出金','引落金額','借方金額','debit','withdrawal'];
