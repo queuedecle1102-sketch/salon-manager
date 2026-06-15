@@ -3638,15 +3638,48 @@ function normalizeCardDate(raw) {
 function parseCardCSV(text) {
   const lines = text.trim().replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
   const pr = l => l.split(',').map(c=>c.trim().replace(/^"|"$/g,''));
-  // ヘッダー行を探す（2列以上マッチした行を優先）
-  let hi = 0, bestScore = 0;
+  const SKIP_CARD = ['合計','小計','お支払い合計','繰越','ポイント','割引','キャッシング','ボーナス払い'];
+
+  // ヘッダー行があるか判定（2列以上キーワードマッチ）
   const allKW = [...CARD_AMT_KW, ...CARD_DATE_KW, ...CARD_DESC_KW];
+  let hi = -1, bestScore = 0;
   for (let i=0; i<Math.min(lines.length,10); i++) {
     const cols = pr(lines[i]);
     const score = cols.filter(c => allKW.some(k => c.replace(/\s/g,'').toLowerCase().includes(k.toLowerCase()))).length;
     if (score > bestScore) { bestScore = score; hi = i; }
     if (score >= 2) break;
   }
+
+  // ヘッダーなし形式（三井住友・楽天等）
+  // 構造: 日付(YYYY/M/D) / 利用先 / 単価 / 個数 / 個数 / 合計金額 / メモ
+  if (bestScore < 2) {
+    let total = 0;
+    const expRows = [];
+    lines.forEach(line => {
+      const row = pr(line);
+      if (row.length < 2) return;
+      const dateRaw = row[0];
+      const desc    = row[1] || '';
+      // 日付形式でない行はスキップ（カード名行・合計行など）
+      if (!dateRaw || !dateRaw.match(/^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}/)) return;
+      if (SKIP_CARD.some(k => desc.includes(k))) return;
+      // 金額: 列5（合計）優先、なければ列2（単価）
+      const amt = sbParseNum(row[5]) || sbParseNum(row[2]);
+      if (amt <= 0) return;
+      total += amt;
+      expRows.push({
+        date:   normalizeCardDate(dateRaw),
+        desc:   desc,
+        amount: amt,
+        source: 'card-csv',
+      });
+    });
+    if (expRows.length === 0)
+      return { ok:false, error:'データ行が見つかりませんでした。日付形式（YYYY/M/D）の行がありません。' };
+    return { ok:true, total, expRows, rowCount:lines.length, headers:['日付','利用先','単価','','','合計','メモ'], ci:{amt:5,date:0,desc:1}, noHeader:true };
+  }
+
+  // ヘッダーあり形式
   const headers = pr(lines[hi]);
   const rows    = lines.slice(hi+1).map(pr).filter(r=>r.some(c=>c!==''));
   const ci = {
@@ -3657,7 +3690,6 @@ function parseCardCSV(text) {
   if (ci.amt === -1)
     return { ok:false, error:`金額列が見つかりませんでした。\n検出ヘッダー：${headers.join(' / ')}` };
 
-  const SKIP_CARD = ['合計','小計','お支払い合計','繰越','ポイント','割引','キャッシング','ボーナス払い'];
   let total = 0;
   const expRows = [];
   rows.forEach(row => {
