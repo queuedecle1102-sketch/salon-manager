@@ -2326,7 +2326,7 @@ function renderHome() {
   const allEvents = [
     ...db.sales.map(s=>({...s,type:'sale'})),
     ...db.expenses.map(e=>({...e,type:'expense'}))
-  ].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,5);
+  ].sort((a,b)=>dateStr(b.date).localeCompare(dateStr(a.date))).slice(0,5);
   const list = document.getElementById('activity-list');
   if (allEvents.length===0) {
     list.innerHTML=`<div class="activity-item"><div class="activity-dot gold"></div><div class="activity-text">まだ記録がありません</div><div class="activity-time">—</div></div>`;
@@ -3899,7 +3899,7 @@ function expRenderAll() {
   if (cardClearBtn) cardClearBtn.style.display = card.length>0 ? '' : 'none';
   const wrap = document.getElementById('exp-list-wrap');
   const summary = document.getElementById('exp-list-summary');
-  const sorted = [...all].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const sorted = [...all].sort((a,b)=>dateStr(b.date).localeCompare(dateStr(a.date)));
   if (!sorted.length) {
     wrap.innerHTML = '<p style="text-align:center;color:var(--gray3);font-size:.82rem;padding:24px 0">この月の経費はまだありません</p>';
     if (summary) summary.textContent = '';
@@ -3989,7 +3989,7 @@ function renderCoSummary() {
 }
 function renderCoExpenses() {
   const ym = coMonth;
-  const rows = db.companyExpenses.filter(e=>dateStr(e.date).startsWith(ym)).sort((a,b)=>a.date.localeCompare(b.date));
+  const rows = db.companyExpenses.filter(e=>dateStr(e.date).startsWith(ym)).sort((a,b)=>dateStr(a.date).localeCompare(dateStr(b.date)));
   const total = rows.reduce((a,e)=>a+(e.amount||0),0);
   const wrap = document.getElementById('coexp-table-wrap');
   if (!rows.length) { wrap.innerHTML='<p style="text-align:center;color:var(--gray3);font-size:.82rem;padding:24px">この月の会社経費はありません</p>'; return; }
