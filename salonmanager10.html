@@ -1630,8 +1630,9 @@ async function loadFromCloud() {
       }
       // db を丸ごと置き換えず、中身だけ更新する（getterを維持するため）
       Object.keys(merged).forEach(k => { db[k] = merged[k]; });
-      // getter がないキーを再設定
+      // getter を再設定し、全dateを文字列に正規化
       reattachGetters();
+      normalizeAllDates(db);
       _ls.setItem(SYNC_TS_KEY, new Date().toISOString());
       if (db.company && db.company.name && db.company.name !== '本店' && db.company.name !== '') {
         _ls.setItem('salonSetupDone', '1');
@@ -1754,7 +1755,27 @@ function ensureDBFields(d) {
   if (!d.salesDetail)     d.salesDetail = {};
   if (!d.staffSummary)    d.staffSummary = {};
   (d.stores||[]).forEach(s => { if (!d.storeData[s.id]) d.storeData[s.id] = initStoreDataObj(); });
+  // 全レコードのdate・amountを正規化
+  normalizeAllDates(d);
   return d;
+}
+
+// date を必ず文字列に、amount を必ず数値に変換する
+function normalizeAllDates(d) {
+  const fixRec = r => {
+    if (r.date != null) r.date = String(r.date);
+    if (r.amount != null) r.amount = Number(r.amount) || 0;
+    return r;
+  };
+  (d.companyExpenses || []).forEach(fixRec);
+  Object.values(d.storeData || {}).forEach(sd => {
+    (sd.sales     || []).forEach(fixRec);
+    (sd.expenses  || []).forEach(fixRec);
+    (sd.inventory || []).forEach(fixRec);
+    (sd.commissionHistory || []).forEach(r => {
+      if (r.month != null) r.month = String(r.month);
+    });
+  });
 }
 function initStoreDataObj() {
   return { sales:[], expenses:[], inventory:[], staff:[], customPatterns:[], commissionHistory:[] };
