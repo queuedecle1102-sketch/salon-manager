@@ -1755,6 +1755,18 @@ function ensureDBFields(d) {
   if (!d.salesDetail)     d.salesDetail = {};
   if (!d.staffSummary)    d.staffSummary = {};
   (d.stores||[]).forEach(s => { if (!d.storeData[s.id]) d.storeData[s.id] = initStoreDataObj(); });
+  // 旧バージョンで storeData.expenses に保存されたCSV経費を companyExpenses に移行
+  let migrated = 0;
+  (d.stores || []).forEach(s => {
+    const sd = (d.storeData || {})[s.id];
+    if (!sd || !sd.expenses) return;
+    const csvExp = sd.expenses.filter(e => e.source === 'bank-csv' || e.source === 'card-csv');
+    if (csvExp.length > 0) {
+      const existIds = new Set((d.companyExpenses || []).map(e => e.id));
+      csvExp.forEach(e => { if (!existIds.has(e.id)) { d.companyExpenses.push(e); migrated++; } });
+      sd.expenses = sd.expenses.filter(e => e.source !== 'bank-csv' && e.source !== 'card-csv');
+    }
+  });
   // 全レコードのdate・amountを正規化
   normalizeAllDates(d);
   return d;
@@ -2318,14 +2330,14 @@ function renderHome() {
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const monthlySales = db.sales.filter(s=>s.date&&dateStr(s.date).startsWith(ym)).reduce((a,s)=>a+(s.amount||0),0);
-  const monthlyExp   = db.expenses.filter(e=>e.date&&dateStr(e.date).startsWith(ym)).reduce((a,e)=>a+(e.amount||0),0);
+  const monthlyExp   = db.companyExpenses.filter(e=>e.date&&dateStr(e.date).startsWith(ym)).reduce((a,e)=>a+(e.amount||0),0);
   document.getElementById('kpi-sales').textContent  = fmtYen(monthlySales);
   document.getElementById('kpi-exp').textContent    = fmtYen(monthlyExp);
   document.getElementById('kpi-profit').textContent = fmtYen(monthlySales-monthlyExp);
   document.getElementById('kpi-staff').textContent  = db.staff.length;
   const allEvents = [
     ...db.sales.map(s=>({...s,type:'sale'})),
-    ...db.expenses.map(e=>({...e,type:'expense'}))
+    ...db.companyExpenses.filter(e=>dateStr(e.date).startsWith(ym)).map(e=>({...e,type:'expense'}))
   ].sort((a,b)=>dateStr(b.date).localeCompare(dateStr(a.date))).slice(0,5);
   const list = document.getElementById('activity-list');
   if (allEvents.length===0) {
@@ -3610,15 +3622,15 @@ function expProcessCSV(text, month, filename) {
 
   // 月ごとに既存データを削除して再登録
   ymList.forEach(ym => {
-    activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(ym) && e.source==='bank-csv'));
+    db.companyExpenses = db.companyExpenses.filter(e => !(dateStr(e.date).startsWith(ym) && e.source==='bank-csv'));
   });
   result.expRows.forEach(row => {
     const rowMonth = dateStr(row.date).slice(0,7) || useMonth;
-    activeSD().expenses.push({ id:uid(), date:row.date||`${rowMonth}-01`, desc:row.desc, amount:row.amount, source:'bank-csv', memo:row.desc });
+    db.companyExpenses.push({ id:uid(), date:row.date||`${rowMonth}-01`, desc:row.desc, amount:row.amount, source:'bank-csv', memo:row.desc });
   });
   if (result.expRows.length===0 && result.totalOut>0 && useMonth) {
-    activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(useMonth) && e.source==='bank-csv'));
-    activeSD().expenses.push({ id:uid(), date:`${useMonth}-01`, desc:'銀行出金（月計）', amount:result.totalOut, source:'bank-csv', memo:'銀行CSV' });
+    db.companyExpenses = db.companyExpenses.filter(e => !(dateStr(e.date).startsWith(useMonth) && e.source==='bank-csv'));
+    db.companyExpenses.push({ id:uid(), date:`${useMonth}-01`, desc:'銀行出金（月計）', amount:result.totalOut, source:'bank-csv', memo:'銀行CSV' });
   }
   saveDB();
 
@@ -3651,7 +3663,7 @@ function expProcessCSV(text, month, filename) {
 function expClearBankCSV() {
   const month = document.getElementById('exp-target-month').value;
   if (!month || !confirm(`${month}の銀行CSVデータを消去しますか？`)) return;
-  activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(month) && e.source==='bank-csv'));
+  db.companyExpenses = db.companyExpenses.filter(e => !(dateStr(e.date).startsWith(month) && e.source==='bank-csv'));
   saveDB();
   document.getElementById('exp-csv-result').style.display = 'none';
   expRenderAll();
@@ -3809,11 +3821,11 @@ function cardProcessCSV(text, month, filename) {
 
   // 月ごとに既存データを削除して再登録（対象月絞り込みなし）
   ymList.forEach(ym => {
-    activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(ym) && e.source==='card-csv'));
+    db.companyExpenses = db.companyExpenses.filter(e => !(dateStr(e.date).startsWith(ym) && e.source==='card-csv'));
   });
   result.expRows.forEach(row => {
     const rowMonth = dateStr(row.date).slice(0,7) || useMonth;
-    activeSD().expenses.push({ id:uid(), date:row.date||`${rowMonth}-01`, desc:row.desc, amount:row.amount, source:'card-csv', memo:row.desc });
+    db.companyExpenses.push({ id:uid(), date:row.date||`${rowMonth}-01`, desc:row.desc, amount:row.amount, source:'card-csv', memo:row.desc });
   });
   saveDB();
 
@@ -3847,7 +3859,7 @@ function cardProcessCSV(text, month, filename) {
 function expClearCardCSV() {
   const month = document.getElementById('exp-target-month').value;
   if (!month || !confirm(`${month}のカードCSVデータを消去しますか？`)) return;
-  activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(month) && e.source==='card-csv'));
+  db.companyExpenses = db.companyExpenses.filter(e => !(dateStr(e.date).startsWith(month) && e.source==='card-csv'));
   saveDB();
   document.getElementById('card-csv-result').style.display = 'none';
   document.getElementById('card-clear-btn').style.display = 'none';
@@ -3861,7 +3873,7 @@ function cashExpAdd() {
   if (!date)   { alert('日付を入力してください'); return; }
   if (!desc)   { document.getElementById('cash-desc').focus(); return; }
   if (amount<=0){ alert('金額を入力してください'); return; }
-  activeSD().expenses.push({ id:uid(), date, desc, amount, source:'cash', memo:desc });
+  db.companyExpenses.push({ id:uid(), date, desc, amount, source:'cash', memo:desc });
   saveDB();
   document.getElementById('cash-desc').value   = '';
   document.getElementById('cash-amount').value = '';
@@ -3870,7 +3882,7 @@ function cashExpAdd() {
 }
 function expDeleteItem(id) {
   if (!confirm('この経費を削除しますか？')) return;
-  activeSD().expenses = activeSD().expenses.filter(e=>e.id!==id);
+  db.companyExpenses = db.companyExpenses.filter(e=>e.id!==id);
   saveDB();
   expRenderAll();
   renderHome();
@@ -3878,7 +3890,7 @@ function expDeleteItem(id) {
 function expRenderAll() {
   const month = document.getElementById('exp-target-month')?.value;
   if (!month) return;
-  const all   = activeSD().expenses.filter(e=>dateStr(e.date).startsWith(month));
+  const all   = db.companyExpenses.filter(e=>dateStr(e.date).startsWith(month));
   const bank  = all.filter(e=>e.source==='bank-csv');
   const card  = all.filter(e=>e.source==='card-csv');
   const cash  = all.filter(e=>e.source==='cash');
