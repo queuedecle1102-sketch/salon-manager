@@ -1561,7 +1561,15 @@ const GAS_TOKEN = 'salonmanager2026';
 // ============================================================
 
 const DB_KEY      = 'storeManagerDB_v3';
-const SYNC_TS_KEY = 'storeManagerSyncTS';   // 最終同期タイムスタンプ
+const SYNC_TS_KEY = 'storeManagerSyncTS';
+
+// Safariプライベートモード対応：localStorage が使えない場合はメモリで代替
+const _memStore = {};
+const _ls = {
+  getItem:    (k)    => { try { return localStorage.getItem(k); } catch { return _memStore[k]||null; } },
+  setItem:    (k, v) => { try { localStorage.setItem(k, v); } catch { _memStore[k]=v; } },
+  removeItem: (k)    => { try { localStorage.removeItem(k); } catch { delete _memStore[k]; } },
+};
 const STORE_COLORS = ['#FF8C69','#F76C8F','#FFAB5E','#7BC67E','#89CFF0','#B39DDB','#FF6B6B','#80CBC4'];
 
 // ---- 同期ステータスUI ----
@@ -1581,8 +1589,8 @@ async function syncToCloud(silent) {
   if (_syncTimer) { clearTimeout(_syncTimer); _syncTimer = null; }
   try {
     const remoteDB = await gasPost({ action: 'fullSync', db: JSON.stringify(db) });
-    localStorage.setItem(DB_KEY, JSON.stringify(remoteDB));
-    localStorage.setItem(SYNC_TS_KEY, new Date().toISOString());
+    _ls.setItem(DB_KEY, JSON.stringify(remoteDB));
+    _ls.setItem(SYNC_TS_KEY, new Date().toISOString());
     if (!silent) _setSyncStatus('ok', '同期済み ' + _fmtTime(new Date()));
     setTimeout(() => _setSyncStatus('idle', ''), 3000);
   } catch(e) {
@@ -1618,11 +1626,11 @@ async function loadFromCloud() {
         merged = mergeDB(db, remoteDB);
       }
       db = merged;
-      localStorage.setItem(DB_KEY, JSON.stringify(db));
-      localStorage.setItem(SYNC_TS_KEY, new Date().toISOString());
+      _ls.setItem(DB_KEY, JSON.stringify(db));
+      _ls.setItem(SYNC_TS_KEY, new Date().toISOString());
       // 店舗名が設定済みなら初回設定フラグを立てる
       if (db.company && db.company.name && db.company.name !== '本店' && db.company.name !== '') {
-        localStorage.setItem('salonSetupDone', '1');
+        _ls.setItem('salonSetupDone', '1');
       }
       renderGreeting(); renderHome(); renderAlerts(); renderStoreSelectList();
       _setSyncStatus('ok', 'ロード完了 ' + _fmtTime(new Date()));
@@ -1691,7 +1699,7 @@ function _fmtTime(d) {
 
 // ---- saveDB: localStorage保存 ＋ 遅延クラウド同期（3秒debounce）----
 function saveDB() {
-  localStorage.setItem(DB_KEY, JSON.stringify(db));
+  _ls.setItem(DB_KEY, JSON.stringify(db));
   if (GAS_URL && GAS_URL !== 'YOUR_GAS_DEPLOY_URL_HERE') {
     _setSyncStatus('syncing', '保存中…');
     if (_syncTimer) clearTimeout(_syncTimer);
@@ -1758,16 +1766,16 @@ function defaultDB() {
 function loadDB() {
   // v3 → v2 → v1 の順に既存localStorageをマイグレーション
   try {
-    const raw = JSON.parse(localStorage.getItem(DB_KEY));
+    const raw = JSON.parse(_ls.getItem(DB_KEY));
     if (raw) return migrateDB(raw);
   } catch {}
   try {
-    const old = JSON.parse(localStorage.getItem('storeManagerDB_v2'));
-    if (old) { const d = migrateDB(old); localStorage.setItem(DB_KEY, JSON.stringify(d)); return d; }
+    const old = JSON.parse(_ls.getItem('storeManagerDB_v2'));
+    if (old) { const d = migrateDB(old); _ls.setItem(DB_KEY, JSON.stringify(d)); return d; }
   } catch {}
   try {
-    const v1 = JSON.parse(localStorage.getItem('storeManagerDB'));
-    if (v1) { const d = migrateDB(v1); localStorage.setItem(DB_KEY, JSON.stringify(d)); return d; }
+    const v1 = JSON.parse(_ls.getItem('storeManagerDB'));
+    if (v1) { const d = migrateDB(v1); _ls.setItem(DB_KEY, JSON.stringify(d)); return d; }
   } catch {}
   return defaultDB();
 }
@@ -2330,7 +2338,7 @@ function saveSettings() {
   if (db.stores.length === 1 && db.stores[0].name === oldName) {
     db.stores[0].name = newName || '本店';
   }
-  localStorage.setItem('salonSetupDone', '1');
+  _ls.setItem('salonSetupDone', '1');
   saveDB(); closeModal('settings-modal'); renderGreeting(); renderHome();
 }
 function renderDate() {
@@ -2961,8 +2969,8 @@ function sbParseSummaryCSV(text) {
 
 // 未マッピングスタッフ検出
 function detectUnmappedStaff(csvNames) {
-  const map      = db.company.staffNameMap || {};
-  const regNames = new Set(db.staff.map(s=>s.name));
+  const map      = (db.company && db.company.staffNameMap) || {};
+  const regNames = new Set((db.staff || []).map(s=>s.name));
   return csvNames.filter(n => {
     const resolved = map[n] || n;
     return !regNames.has(resolved);
@@ -4045,8 +4053,8 @@ const GAS_TOKEN_KEY = 'salonManagerGasToken';
 
 // 起動時にlocalStorageから保存済みURL・トークンを即座に読み込む
 (function loadSavedGasSettings() {
-  const savedUrl   = localStorage.getItem(GAS_URL_KEY);
-  const savedToken = localStorage.getItem(GAS_TOKEN_KEY);
+  const savedUrl   = _ls.getItem(GAS_URL_KEY);
+  const savedToken = _ls.getItem(GAS_TOKEN_KEY);
   if (savedUrl)   window._GAS_URL_OVERRIDE   = savedUrl;
   if (savedToken) window._GAS_TOKEN_OVERRIDE = savedToken;
 })();
@@ -4100,7 +4108,7 @@ function openCloudSetup() {
   document.getElementById('gas-url-input').value = (cur && cur !== 'YOUR_GAS_DEPLOY_URL_HERE') ? cur : '';
   document.getElementById('gas-token-input').value = (curToken && curToken !== 'YOUR_SECRET_TOKEN_HERE') ? curToken : '';
   document.getElementById('gas-test-result').textContent = '';
-  const ts = localStorage.getItem(SYNC_TS_KEY);
+  const ts = _ls.getItem(SYNC_TS_KEY);
   const lbl = document.getElementById('gas-last-sync-label');
   const fBtn = document.getElementById('gas-force-sync-btn');
   const dBtn = document.getElementById('gas-disconnect-btn');
@@ -4146,8 +4154,8 @@ function saveGasUrl() {
   const token = document.getElementById('gas-token-input').value.trim();
   if (!url) { alert('URLを入力してください'); return; }
   if (!token) { alert('トークンを入力してください'); return; }
-  localStorage.setItem(GAS_URL_KEY, url);
-  localStorage.setItem(GAS_TOKEN_KEY, token);
+  _ls.setItem(GAS_URL_KEY, url);
+  _ls.setItem(GAS_TOKEN_KEY, token);
   window._GAS_URL_OVERRIDE = url;
   window._GAS_TOKEN_OVERRIDE = token;
   _setSyncStatus('syncing', '初回同期中…');
@@ -4157,8 +4165,8 @@ function saveGasUrl() {
 
 function disconnectGas() {
   if (!confirm('クラウド接続を解除します。ローカルデータは残ります。')) return;
-  localStorage.removeItem(GAS_URL_KEY);
-  localStorage.removeItem(GAS_TOKEN_KEY);
+  _ls.removeItem(GAS_URL_KEY);
+  _ls.removeItem(GAS_TOKEN_KEY);
   window._GAS_URL_OVERRIDE = null;
   window._GAS_TOKEN_OVERRIDE = null;
   _setSyncStatus('idle', 'クラウド未設定');
@@ -4200,11 +4208,11 @@ function init() {
 
   // 設定未完了なら設定モーダルを開く
   const hasCustomName = db.company.name && db.company.name !== '' && db.company.name !== '本店';
-  if (!hasCustomName && !localStorage.getItem('salonSetupDone')) setTimeout(openSettings, 600);
+  if (!hasCustomName && !_ls.getItem('salonSetupDone')) setTimeout(openSettings, 600);
 
   // GAS URL / TOKEN が設定済みならクラウドからロード
-  const savedUrl   = localStorage.getItem(GAS_URL_KEY);
-  const savedToken = localStorage.getItem(GAS_TOKEN_KEY);
+  const savedUrl   = _ls.getItem(GAS_URL_KEY);
+  const savedToken = _ls.getItem(GAS_TOKEN_KEY);
   if (savedUrl) {
     window._GAS_URL_OVERRIDE   = savedUrl;
     window._GAS_TOKEN_OVERRIDE = savedToken || GAS_TOKEN;
