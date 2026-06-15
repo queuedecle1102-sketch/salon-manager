@@ -1403,6 +1403,7 @@
     <div id="gas-sync-info" style="margin-top:14px;font-size:.75rem;color:var(--gray3);border-top:1px solid var(--gray2);padding-top:10px">
       <span id="gas-last-sync-label"></span>
       <button id="gas-force-sync-btn" style="display:none" class="btn btn-ghost" style="font-size:.72rem;padding:4px 10px;margin-left:8px" onclick="forceSyncNow()">🔄 今すぐ同期</button>
+      <button id="gas-repair-btn" style="display:none" class="btn btn-ghost" style="font-size:.72rem;padding:4px 10px;margin-left:8px;color:var(--coral)" onclick="repairStoresNow()">🛠 店舗重複修復</button>
       <button id="gas-disconnect-btn" style="display:none" class="btn" style="font-size:.72rem;padding:4px 10px;margin-left:8px;color:var(--coral);border-color:var(--coral);background:transparent" onclick="disconnectGas()">❌ 接続解除</button>
     </div>
   </div>
@@ -1555,7 +1556,7 @@
 // ============================================================
 //  ★ GAS デプロイURL をここに設定してください
 // ============================================================
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbwTyjMH6JlasGaG1hEUpbT7fqQ6nhlw1jAqLDNn9galeUEN5m0PkVGG5TpDs8nS8Pc/exec';
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbzj0Y2VIXeAHX0WKhVrhnMmPqtSXP6bb679thSAwtKVO5SayDhfPQw6Dp_e_eL-BXQN/exec';
 const GAS_TOKEN = 'salonmanager2026';
 // ============================================================
 
@@ -1597,11 +1598,32 @@ async function loadFromCloud() {
   try {
     const remoteDB = await gasGet({ action: 'fullLoad' });
     if (remoteDB && remoteDB.stores && remoteDB.stores.length > 0) {
-      const merged = mergeDB(db, remoteDB);
+      // ローカルが初期状態（データが何もない）かどうかを判定
+      const localIsEmpty = db.stores.length <= 1 &&
+        (!db.stores[0] || (
+          (db.storeData[db.stores[0]?.id]?.sales||[]).length === 0 &&
+          (db.storeData[db.stores[0]?.id]?.expenses||[]).length === 0 &&
+          (db.storeData[db.stores[0]?.id]?.staff||[]).length === 0 &&
+          !db.company.name
+        ));
+
+      let merged;
+      if (localIsEmpty) {
+        // ローカルが空ならGASのデータをそのまま使う（マージしない）
+        merged = ensureDBFields(remoteDB);
+        // salesDetail/staffSummary はlocalから引き継ぎ
+        merged.salesDetail  = db.salesDetail  || {};
+        merged.staffSummary = db.staffSummary || {};
+      } else {
+        merged = mergeDB(db, remoteDB);
+      }
       db = merged;
       localStorage.setItem(DB_KEY, JSON.stringify(db));
       localStorage.setItem(SYNC_TS_KEY, new Date().toISOString());
-      // UIを再描画
+      // 店舗名が設定済みなら初回設定フラグを立てる
+      if (db.company && db.company.name && db.company.name !== '本店' && db.company.name !== '') {
+        localStorage.setItem('salonSetupDone', '1');
+      }
       renderGreeting(); renderHome(); renderAlerts(); renderStoreSelectList();
       _setSyncStatus('ok', 'ロード完了 ' + _fmtTime(new Date()));
       setTimeout(() => _setSyncStatus('idle', ''), 3000);
@@ -1619,16 +1641,25 @@ async function loadFromCloud() {
 
 // ---- ローカル優先マージ（日付が新しい方を採用） ----
 function mergeDB(local, remote) {
-  // 単純戦略: storeDataはIDで突合し、各配列はIDをキーにローカル優先でマージ
   const merged = JSON.parse(JSON.stringify(local)); // deep copy
   if (!merged.stores || merged.stores.length === 0) merged.stores = remote.stores;
-  // リモートにしかない店舗を追加
+
+  // リモートにしかない店舗を追加（IDで重複チェック）
   (remote.stores || []).forEach(rs => {
     if (!merged.stores.find(ls => ls.id === rs.id)) {
       merged.stores.push(rs);
       merged.storeData[rs.id] = (remote.storeData || {})[rs.id] || initStoreDataObj();
     }
   });
+
+  // 同じ名前・同じIDの重複店舗を除去（念のため）
+  const seenIds = new Set();
+  merged.stores = merged.stores.filter(s => {
+    if (seenIds.has(s.id)) return false;
+    seenIds.add(s.id);
+    return true;
+  });
+
   // 各店舗のデータをマージ
   merged.stores.forEach(s => {
     const ld = merged.storeData[s.id]   || initStoreDataObj();
@@ -1642,9 +1673,8 @@ function mergeDB(local, remote) {
       commissionHistory: _mergeArr(ld.commissionHistory, rd.commissionHistory),
     };
   });
-  // 法人経費マージ
+
   merged.companyExpenses = _mergeArr(local.companyExpenses || [], remote.companyExpenses || []);
-  // salesDetail / staffSummary はローカル優先でマージ（GASに保存されない月次CSVデータ）
   merged.salesDetail  = { ...(remote.salesDetail  || {}), ...(local.salesDetail  || {}) };
   merged.staffSummary = { ...(remote.staffSummary || {}), ...(local.staffSummary || {}) };
   return merged;
@@ -4077,9 +4107,13 @@ function openCloudSetup() {
   if (cur && cur !== 'YOUR_GAS_DEPLOY_URL_HERE') {
     lbl.textContent = ts ? '最終同期: ' + new Date(ts).toLocaleString('ja-JP') : '未同期';
     fBtn.style.display = ''; dBtn.style.display = '';
+    const rBtn = document.getElementById('gas-repair-btn');
+    if (rBtn) rBtn.style.display = '';
   } else {
     lbl.textContent = '未接続';
     fBtn.style.display = 'none'; dBtn.style.display = 'none';
+    const rBtn = document.getElementById('gas-repair-btn');
+    if (rBtn) rBtn.style.display = 'none';
   }
   openModal('cloud-setup-modal');
 }
@@ -4134,6 +4168,17 @@ function disconnectGas() {
 async function forceSyncNow() {
   closeModal('cloud-setup-modal');
   await syncToCloud(false);
+}
+async function repairStoresNow() {
+  closeModal('cloud-setup-modal');
+  _setSyncStatus('syncing', '店舗データ修復中…');
+  try {
+    const result = await gasGet({ action: 'repairStores' });
+    _setSyncStatus('ok', `修復完了（重複${result.repaired}件削除）`);
+    setTimeout(() => loadFromCloud(), 1000);
+  } catch(e) {
+    _setSyncStatus('error', '修復失敗: ' + e.message);
+  }
 }
 
 // ============================================================
