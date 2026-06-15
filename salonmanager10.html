@@ -1629,7 +1629,7 @@ async function loadFromCloud() {
         merged = mergeDB(db, remoteDB);
       }
       db = merged;
-      _ls.setItem(DB_KEY, JSON.stringify(db));
+      reattachGetters();
       _ls.setItem(SYNC_TS_KEY, new Date().toISOString());
       if (db.company && db.company.name && db.company.name !== '本店' && db.company.name !== '') {
         _ls.setItem('salonSetupDone', '1');
@@ -1791,6 +1791,12 @@ function _defProp(key) {
 }
 ['sales','expenses','inventory','staff','customPatterns','commissionHistory'].forEach(_defProp);
 Object.defineProperty(db, 'settings', { get(){ return db.company; }, set(v){ db.company=v; }, configurable:true, enumerable:false });
+
+// db を丸ごと置き換えた後にgetterを再設定する
+function reattachGetters() {
+  ['sales','expenses','inventory','staff','customPatterns','commissionHistory'].forEach(_defProp);
+  Object.defineProperty(db, 'settings', { get(){ return db.company; }, set(v){ db.company=v; }, configurable:true, enumerable:false });
+}
 function fmtYen(n) { return '¥' + Math.round(n).toLocaleString('ja-JP'); }
 function esc(s) { return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
@@ -3386,6 +3392,7 @@ function importData(event) {
       }
       const { _version, _exportedAt, _appName, ...data } = parsed;
       db = ensureDBFields({ ...defaultDB(), ...data });
+      reattachGetters();
       saveDB();
       ensureBizDB();
       closeModal('backup-modal');
