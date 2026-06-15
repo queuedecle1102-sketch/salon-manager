@@ -1605,8 +1605,14 @@ async function loadFromCloud() {
   _setSyncStatus('syncing', 'クラウドからロード中…');
   try {
     const remoteDB = await gasGet({ action: 'fullLoad' });
-    if (remoteDB && remoteDB.stores && remoteDB.stores.length > 0) {
-      // ローカルが初期状態（データが何もない）かどうかを判定
+    if (!remoteDB) throw new Error('GASからのレスポンスが空です');
+    // 基本構造を補完（GASが返さないフィールドを安全に初期化）
+    if (!remoteDB.stores)          remoteDB.stores          = [];
+    if (!remoteDB.storeData)       remoteDB.storeData       = {};
+    if (!remoteDB.company)         remoteDB.company         = {};
+    if (!remoteDB.companyExpenses) remoteDB.companyExpenses = [];
+
+    if (remoteDB.stores.length > 0) {
       const localIsEmpty = db.stores.length <= 1 &&
         (!db.stores[0] || (
           (db.storeData[db.stores[0]?.id]?.sales||[]).length === 0 &&
@@ -1614,12 +1620,9 @@ async function loadFromCloud() {
           (db.storeData[db.stores[0]?.id]?.staff||[]).length === 0 &&
           !db.company.name
         ));
-
       let merged;
       if (localIsEmpty) {
-        // ローカルが空ならGASのデータをそのまま使う（マージしない）
         merged = ensureDBFields(remoteDB);
-        // salesDetail/staffSummary はlocalから引き継ぎ
         merged.salesDetail  = db.salesDetail  || {};
         merged.staffSummary = db.staffSummary || {};
       } else {
@@ -1628,7 +1631,6 @@ async function loadFromCloud() {
       db = merged;
       _ls.setItem(DB_KEY, JSON.stringify(db));
       _ls.setItem(SYNC_TS_KEY, new Date().toISOString());
-      // 店舗名が設定済みなら初回設定フラグを立てる
       if (db.company && db.company.name && db.company.name !== '本店' && db.company.name !== '') {
         _ls.setItem('salonSetupDone', '1');
       }
@@ -1636,17 +1638,15 @@ async function loadFromCloud() {
       _setSyncStatus('ok', 'ロード完了 ' + _fmtTime(new Date()));
       setTimeout(() => _setSyncStatus('idle', ''), 3000);
     } else {
-      // クラウドが空→ローカルをアップロード
       await syncToCloud(true);
       _setSyncStatus('ok', '初回アップロード完了');
       setTimeout(() => _setSyncStatus('idle', ''), 3000);
     }
   } catch(e) {
     _setSyncStatus('offline', 'オフライン（ローカルモード）');
-    console.warn('[LoadCloud]', e.message);
+    console.warn('[LoadCloud]', e.message, e.stack);
   }
 }
-
 // ---- ローカル優先マージ（日付が新しい方を採用） ----
 function mergeDB(local, remote) {
   const merged = JSON.parse(JSON.stringify(local)); // deep copy
@@ -1689,8 +1689,8 @@ function mergeDB(local, remote) {
 }
 function _mergeArr(local, remote) {
   const map = {};
-  (remote || []).forEach(r => { map[r.id] = r; });
-  (local  || []).forEach(r => { map[r.id] = r; }); // ローカル優先
+  (Array.isArray(remote) ? remote : []).forEach(r => { if(r&&r.id) map[r.id] = r; });
+  (Array.isArray(local)  ? local  : []).forEach(r => { if(r&&r.id) map[r.id] = r; });
   return Object.values(map);
 }
 function _fmtTime(d) {
