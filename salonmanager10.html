@@ -1805,6 +1805,8 @@ function reattachGetters() {
 }
 function fmtYen(n) { return '¥' + Math.round(n).toLocaleString('ja-JP'); }
 function esc(s) { return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// 日付を必ず文字列として返すヘルパー（数値・null・undefined対応）
+function dateStr(d) { return d == null ? '' : String(d); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 function openModal(id) { document.getElementById(id).classList.add('open'); }
@@ -2294,8 +2296,8 @@ function updateCalcStaffSelect() {
 function renderHome() {
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  const monthlySales = db.sales.filter(s=>s.date&&s.date.startsWith(ym)).reduce((a,s)=>a+(s.amount||0),0);
-  const monthlyExp   = db.expenses.filter(e=>e.date&&e.date.startsWith(ym)).reduce((a,e)=>a+(e.amount||0),0);
+  const monthlySales = db.sales.filter(s=>s.date&&dateStr(s.date).startsWith(ym)).reduce((a,s)=>a+(s.amount||0),0);
+  const monthlyExp   = db.expenses.filter(e=>e.date&&dateStr(e.date).startsWith(ym)).reduce((a,e)=>a+(e.amount||0),0);
   document.getElementById('kpi-sales').textContent  = fmtYen(monthlySales);
   document.getElementById('kpi-exp').textContent    = fmtYen(monthlyExp);
   document.getElementById('kpi-profit').textContent = fmtYen(monthlySales-monthlyExp);
@@ -3101,7 +3103,7 @@ function commitDetailCSV(month, result, filename) {
     });
   } else if (result.totalAmt > 0) {
     // 日付列なし → 月計1件（従来通り月全体を置き換え）
-    db.sales = db.sales.filter(s => !(s.date && s.date.startsWith(ym) && s.source === 'csv'));
+    db.sales = db.sales.filter(s => !(s.date && dateStr(s.date).startsWith(ym) && s.source === 'csv'));
     db.sales.push({ id:uid(), date:`${ym}-01`, amount:result.totalAmt, memo:'サロンボードCSV（月計）', source:'csv' });
   }
 
@@ -3128,7 +3130,7 @@ function commitDetailCSV(month, result, filename) {
 
   // バナー表示
   const csvDaysCount    = Object.keys(result.daily).length;
-  const totalDaysLoaded = db.sales.filter(s=>s.date?.startsWith(ym)&&s.source==='csv').length;
+  const totalDaysLoaded = db.sales.filter(s=>dateStr(s.date).startsWith(ym)&&s.source==='csv').length;
   const banner = document.getElementById('sales-detail-banner');
   banner.style.cssText = 'display:flex;background:linear-gradient(135deg,#e8f8ec,#d4f4da);border:1.5px solid #a8e0b0;border-radius:9px;padding:10px 14px;margin-top:10px;align-items:center;gap:10px;font-size:.8rem';
   banner.innerHTML = `<span style="font-size:1.4rem">✅</span><div><b style="color:#1b5e20">${esc(filename)}</b> を追加しました<br><span style="color:#2e7d32">今回 ${csvDaysCount}日分 追加 → ${ym} 累計 ${totalDaysLoaded}日分</span></div>`;
@@ -3356,7 +3358,7 @@ function salesClearData() {
   const month = document.getElementById('sales-target-month').value;
   if (!month) return;
   if (!confirm(`${month}のCSV読み込みデータを消去しますか？`)) return;
-  db.sales = db.sales.filter(s => !(s.date && s.date.startsWith(month) && s.source === 'csv'));
+  db.sales = db.sales.filter(s => !(s.date && dateStr(s.date).startsWith(month) && s.source === 'csv'));
   if (db.salesDetail)  { delete db.salesDetail[month]; delete db.salesDetail[`${month}_dates`]; }
   if (db.staffSummary) delete db.staffSummary[month];
   saveDB();
@@ -3444,8 +3446,8 @@ const CARD_DESC_KW = ['利用先','ご利用先','加盟店名','店名','内容
 // 銀行CSVでカード引き落としと判定するキーワード（摘要列に含まれる場合にスキップ）
 const CARD_EXCLUDE_KW_DEFAULT = [
   'カード','クレジット','CARD','CREDIT','VISA','MASTER','JCB','AMEX',
-  'アメックス','ダイナース','DINERS','楽天','RAKUTEN','三井住友','SMCC','SMBC',
-  'UFJニコス','DCカード','イオン','OMC','セゾン','SAISON','オリコ','ORICO',
+  'アメックス','ダイナース','DINERS','楽天カード','RAKUTEN CARD','SMCC','ｽﾐﾄﾓｶｰﾄﾞ','ﾐﾂｲｽﾐﾄﾓｶ-ﾄﾞ',
+  'UFJニコス','DCカード','イオンカード','OMC','セゾン','SAISON','オリコ','ORICO',
   'ライフカード','エポスカード','ヤフーカード','au PAY','dカード'
 ];
 function expDetectCol(headers, keywords) {
@@ -3587,14 +3589,14 @@ function expProcessCSV(text, month, filename) {
 
   // 月ごとに既存データを削除して再登録
   ymList.forEach(ym => {
-    activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(ym) && e.source==='bank-csv'));
+    activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(ym) && e.source==='bank-csv'));
   });
   result.expRows.forEach(row => {
-    const rowMonth = row.date?.slice(0,7) || useMonth;
+    const rowMonth = dateStr(row.date).slice(0,7) || useMonth;
     activeSD().expenses.push({ id:uid(), date:row.date||`${rowMonth}-01`, desc:row.desc, amount:row.amount, source:'bank-csv', memo:row.desc });
   });
   if (result.expRows.length===0 && result.totalOut>0 && useMonth) {
-    activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(useMonth) && e.source==='bank-csv'));
+    activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(useMonth) && e.source==='bank-csv'));
     activeSD().expenses.push({ id:uid(), date:`${useMonth}-01`, desc:'銀行出金（月計）', amount:result.totalOut, source:'bank-csv', memo:'銀行CSV' });
   }
   saveDB();
@@ -3628,7 +3630,7 @@ function expProcessCSV(text, month, filename) {
 function expClearBankCSV() {
   const month = document.getElementById('exp-target-month').value;
   if (!month || !confirm(`${month}の銀行CSVデータを消去しますか？`)) return;
-  activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(month) && e.source==='bank-csv'));
+  activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(month) && e.source==='bank-csv'));
   saveDB();
   document.getElementById('exp-csv-result').style.display = 'none';
   expRenderAll();
@@ -3786,10 +3788,10 @@ function cardProcessCSV(text, month, filename) {
 
   // 月ごとに既存データを削除して再登録（対象月絞り込みなし）
   ymList.forEach(ym => {
-    activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(ym) && e.source==='card-csv'));
+    activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(ym) && e.source==='card-csv'));
   });
   result.expRows.forEach(row => {
-    const rowMonth = row.date?.slice(0,7) || useMonth;
+    const rowMonth = dateStr(row.date).slice(0,7) || useMonth;
     activeSD().expenses.push({ id:uid(), date:row.date||`${rowMonth}-01`, desc:row.desc, amount:row.amount, source:'card-csv', memo:row.desc });
   });
   saveDB();
@@ -3824,7 +3826,7 @@ function cardProcessCSV(text, month, filename) {
 function expClearCardCSV() {
   const month = document.getElementById('exp-target-month').value;
   if (!month || !confirm(`${month}のカードCSVデータを消去しますか？`)) return;
-  activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(month) && e.source==='card-csv'));
+  activeSD().expenses = activeSD().expenses.filter(e => !(dateStr(e.date).startsWith(month) && e.source==='card-csv'));
   saveDB();
   document.getElementById('card-csv-result').style.display = 'none';
   document.getElementById('card-clear-btn').style.display = 'none';
@@ -3855,7 +3857,7 @@ function expDeleteItem(id) {
 function expRenderAll() {
   const month = document.getElementById('exp-target-month')?.value;
   if (!month) return;
-  const all   = activeSD().expenses.filter(e=>e.date?.startsWith(month));
+  const all   = activeSD().expenses.filter(e=>dateStr(e.date).startsWith(month));
   const bank  = all.filter(e=>e.source==='bank-csv');
   const card  = all.filter(e=>e.source==='card-csv');
   const cash  = all.filter(e=>e.source==='cash');
@@ -3933,12 +3935,12 @@ function renderCoSummary() {
   let totalSales = 0, totalStaff = 0;
   const storeSales = db.stores.map(s => {
     const sd = db.storeData[s.id] || initStoreDataObj();
-    const sal = sd.sales.filter(r=>r.date?.startsWith(ym)).reduce((a,r)=>a+(r.amount||0),0);
+    const sal = sd.sales.filter(r=>dateStr(r.date).startsWith(ym)).reduce((a,r)=>a+(r.amount||0),0);
     totalSales += sal;
     totalStaff += sd.staff.length;
     return { store:s, sales:sal };
   });
-  const companyExp = db.companyExpenses.filter(e=>e.date?.startsWith(ym)).reduce((a,e)=>a+(e.amount||0),0);
+  const companyExp = db.companyExpenses.filter(e=>dateStr(e.date).startsWith(ym)).reduce((a,e)=>a+(e.amount||0),0);
   const profit = totalSales - companyExp;
   document.getElementById('co-kpi-sales').textContent   = fmtYen(totalSales);
   document.getElementById('co-kpi-sales-sub').textContent = `${db.stores.length}店舗合計`;
@@ -3966,7 +3968,7 @@ function renderCoSummary() {
 }
 function renderCoExpenses() {
   const ym = coMonth;
-  const rows = db.companyExpenses.filter(e=>e.date?.startsWith(ym)).sort((a,b)=>a.date.localeCompare(b.date));
+  const rows = db.companyExpenses.filter(e=>dateStr(e.date).startsWith(ym)).sort((a,b)=>a.date.localeCompare(b.date));
   const total = rows.reduce((a,e)=>a+(e.amount||0),0);
   const wrap = document.getElementById('coexp-table-wrap');
   if (!rows.length) { wrap.innerHTML='<p style="text-align:center;color:var(--gray3);font-size:.82rem;padding:24px">この月の会社経費はありません</p>'; return; }
