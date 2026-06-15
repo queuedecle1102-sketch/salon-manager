@@ -1702,7 +1702,8 @@ function _fmtTime(d) {
 // ---- saveDB: localStorage保存 ＋ 遅延クラウド同期（3秒debounce）----
 function saveDB() {
   _ls.setItem(DB_KEY, JSON.stringify(db));
-  if (GAS_URL && GAS_URL !== 'YOUR_GAS_DEPLOY_URL_HERE') {
+  const url = _effectiveGasUrl();
+  if (url && url !== 'YOUR_GAS_DEPLOY_URL_HERE') {
     _setSyncStatus('syncing', '保存中…');
     if (_syncTimer) clearTimeout(_syncTimer);
     _syncTimer = setTimeout(() => syncToCloud(false), 3000);
@@ -3546,17 +3547,18 @@ function expFileSelected(e) {
   e.target.value = '';
 }
 function expReadFile(file) {
-  const month = document.getElementById('exp-target-month').value;
-  if (!month) {
-    alert('先に「対象月」を選択してください。');
-    return;
-  }
+  const month = document.getElementById('exp-target-month').value || '';
   const tryRead = (enc) => {
     const reader = new FileReader();
+    reader.onerror = () => alert('ファイル読み込みに失敗しました');
     reader.onload = (ev) => {
-      const text = ev.target.result;
-      if (enc==='UTF-8' && (text.match(/\uFFFD/g)||[]).length > 5) { tryRead('Shift-JIS'); return; }
-      expProcessCSV(text, month, file.name);
+      try {
+        const text = ev.target.result;
+        if (enc==='UTF-8' && (text.match(/\uFFFD/g)||[]).length > 5) { tryRead('Shift-JIS'); return; }
+        expProcessCSV(text, month, file.name);
+      } catch(e) {
+        alert('処理エラー: ' + e.message);
+      }
     };
     reader.readAsText(file, enc);
   };
@@ -3577,15 +3579,32 @@ function expProcessCSV(text, month, filename) {
       <div style="font-size:.78rem;line-height:1.6;color:var(--text)">${esc(result.error)}</div></div>`;
     return;
   }
-  const ym = month;
-  activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(ym) && e.source==='bank-csv'));
-  result.expRows.forEach(row => {
-    activeSD().expenses.push({ id:uid(), date:row.date||`${ym}-01`, desc:row.desc, amount:row.amount, source:'bank-csv', memo:row.desc });
+  // CSV内の日付から対象月を自動検出（明示指定がなければ）
+  const detectedMonths = new Set(result.expRows.map(r => r.date?.slice(0,7)).filter(Boolean));
+  const ymList = [...detectedMonths].sort();
+  // 対象月が未指定 or CSVと異なる場合は自動採用
+  const useMonth = month || ymList[0] || '';
+
+  // 月ごとに既存データを削除して再登録
+  ymList.forEach(ym => {
+    activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(ym) && e.source==='bank-csv'));
   });
-  if (result.expRows.length===0 && result.totalOut>0) {
-    activeSD().expenses.push({ id:uid(), date:`${ym}-01`, desc:'銀行出金（月計）', amount:result.totalOut, source:'bank-csv', memo:'銀行CSV' });
+  result.expRows.forEach(row => {
+    const rowMonth = row.date?.slice(0,7) || useMonth;
+    activeSD().expenses.push({ id:uid(), date:row.date||`${rowMonth}-01`, desc:row.desc, amount:row.amount, source:'bank-csv', memo:row.desc });
+  });
+  if (result.expRows.length===0 && result.totalOut>0 && useMonth) {
+    activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(useMonth) && e.source==='bank-csv'));
+    activeSD().expenses.push({ id:uid(), date:`${useMonth}-01`, desc:'銀行出金（月計）', amount:result.totalOut, source:'bank-csv', memo:'銀行CSV' });
   }
   saveDB();
+
+  // 対象月UIを自動更新
+  if (useMonth) {
+    const el = document.getElementById('exp-target-month');
+    if (el && !el.value) el.value = useMonth;
+  }
+
   csvResult.style.display = 'block';
   banner.style.cssText = 'background:linear-gradient(135deg,#e8f8ec,#d4f4da);border:1.5px solid #a8e0b0;border-radius:9px;padding:12px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px';
   banner.innerHTML = `<span style="font-size:1.6rem">✅</span>
@@ -3594,6 +3613,7 @@ function expProcessCSV(text, month, filename) {
       <div style="font-size:.76rem;color:#2e7d32;margin-top:2px">
         出金合計 <b>${fmtYen(result.totalOut)}</b>（${result.expRows.length}件）／
         入金合計 ${fmtYen(result.totalIn)}・${result.rowCount}行処理
+        ${ymList.length>1 ? `／ ${ymList.join('・')}` : useMonth ? `／ ${useMonth}` : ''}
         ${result.cardSkipped > 0 ? `／ 💳 カード引き落とし <b>${result.cardSkipped}件</b>を自動除外` : ''}
       </div>
     </div>`;
@@ -3603,7 +3623,7 @@ function expProcessCSV(text, month, filename) {
     `<b>${n}</b>: ${cv[i]>=0 ? `"${esc(result.headers[cv[i]])}"(列${cv[i]+1})` : '未検出'}`
   ).join(' ／ ');
   expRenderAll();
-  renderHome(); 
+  renderHome();
 }
 function expClearBankCSV() {
   const month = document.getElementById('exp-target-month').value;
@@ -3729,14 +3749,18 @@ function cardFileSelected(e) {
   e.target.value = '';
 }
 function cardReadFile(file) {
-  const month = document.getElementById('exp-target-month').value;
-  if (!month) { alert('先に「対象月」を選択してください。'); return; }
+  const month = document.getElementById('exp-target-month').value || '';
   const tryRead = (enc) => {
     const reader = new FileReader();
+    reader.onerror = () => alert('ファイル読み込みに失敗しました');
     reader.onload = (ev) => {
-      const text = ev.target.result;
-      if (enc==='UTF-8' && (text.match(/\uFFFD/g)||[]).length > 5) { tryRead('Shift-JIS'); return; }
-      cardProcessCSV(text, month, file.name);
+      try {
+        const text = ev.target.result;
+        if (enc==='UTF-8' && (text.match(/\uFFFD/g)||[]).length > 5) { tryRead('Shift-JIS'); return; }
+        cardProcessCSV(text, month, file.name);
+      } catch(e) {
+        alert('処理エラー: ' + e.message);
+      }
     };
     reader.readAsText(file, enc);
   };
@@ -3755,29 +3779,43 @@ function cardProcessCSV(text, month, filename) {
       <div style="font-size:.78rem;line-height:1.6;color:var(--text)">${esc(result.error)}</div></div>`;
     return;
   }
-  // 対象月外をスキップして登録
-  activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(month) && e.source==='card-csv'));
-  let skipped = 0;
+  // CSV内の月を自動検出
+  const detectedMonths = new Set(result.expRows.map(r => r.date?.slice(0,7)).filter(Boolean));
+  const ymList = [...detectedMonths].sort();
+  const useMonth = month || ymList[0] || '';
+
+  // 月ごとに既存データを削除して再登録（対象月絞り込みなし）
+  ymList.forEach(ym => {
+    activeSD().expenses = activeSD().expenses.filter(e => !(e.date?.startsWith(ym) && e.source==='card-csv'));
+  });
   result.expRows.forEach(row => {
-    if (row.date && !row.date.startsWith(month)) { skipped++; return; }
-    activeSD().expenses.push({ id:uid(), date:row.date||`${month}-01`, desc:row.desc, amount:row.amount, source:'card-csv', memo:row.desc });
+    const rowMonth = row.date?.slice(0,7) || useMonth;
+    activeSD().expenses.push({ id:uid(), date:row.date||`${rowMonth}-01`, desc:row.desc, amount:row.amount, source:'card-csv', memo:row.desc });
   });
   saveDB();
+
+  // 対象月UIを自動更新
+  if (useMonth) {
+    const el = document.getElementById('exp-target-month');
+    if (el && !el.value) el.value = useMonth;
+  }
+
   csvResult.style.display = 'block';
   banner.style.cssText = 'background:linear-gradient(135deg,#f3eeff,#e8dcff);border:1.5px solid #c3a8e8;border-radius:9px;padding:12px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px';
-  const registered = result.expRows.length - skipped;
   banner.innerHTML = `<span style="font-size:1.6rem">✅</span>
     <div>
       <div style="font-weight:700;color:#5b2d9e;font-size:.9rem">読み込み成功！（${esc(filename)}）</div>
       <div style="font-size:.76rem;color:#6d3bb5;margin-top:2px">
-        カード利用合計 <b>${fmtYen(result.total)}</b>・${registered}件登録
-        ${skipped>0 ? `／ 月外 ${skipped}件スキップ` : ''}
+        カード利用合計 <b>${fmtYen(result.total)}</b>・${result.expRows.length}件登録
+        ${ymList.length>1 ? `／ ${ymList.join('・')}` : useMonth ? `／ ${useMonth}` : ''}
       </div>
     </div>`;
-  colInfo.innerHTML = '🔍 列検出: '
-    + `<b>金額</b>: ${result.ci.amt>=0?`"${esc(result.headers[result.ci.amt])}"(列${result.ci.amt+1})`:'未検出'} ／ `
-    + `<b>日付</b>: ${result.ci.date>=0?`"${esc(result.headers[result.ci.date])}"(列${result.ci.date+1})`:'未検出'} ／ `
-    + `<b>利用先</b>: ${result.ci.desc>=0?`"${esc(result.headers[result.ci.desc])}"(列${result.ci.desc+1})`:'未検出'}`;
+  colInfo.innerHTML = result.noHeader
+    ? '🔍 ヘッダーなし形式（日付／利用先／合計金額 を自動検出）'
+    : '🔍 列検出: '
+      + `<b>金額</b>: 列${result.ci.amt+1} ／ `
+      + `<b>日付</b>: 列${result.ci.date+1} ／ `
+      + `<b>利用先</b>: 列${result.ci.desc+1}`;
   const clearBtn = document.getElementById('card-clear-btn');
   if (clearBtn) clearBtn.style.display = '';
   expRenderAll();
