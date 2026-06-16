@@ -1339,7 +1339,7 @@
     <div id="store-select-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px"></div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('store-select-modal')">閉じる</button>
-      <button class="btn btn-primary" onclick="closeModal('store-select-modal');openAddStore()">＋ 店舗を追加</button>
+      <button class="btn btn-ghost" style="font-size:.82rem" onclick="closeModal('store-select-modal')">閉じる</button>
     </div>
   </div>
 </div>
@@ -1402,6 +1402,7 @@ async function syncToCloud(silent) {
     const remoteDB = await gasPost({ action: 'fullSync', db: JSON.stringify(db) });
     _ls.setItem(DB_KEY, JSON.stringify(remoteDB));
     _ls.setItem(SYNC_TS_KEY, new Date().toISOString());
+    _ls.setItem('salonSetupDone', '1');
     if (!silent) _setSyncStatus('ok', '同期済み ' + _fmtTime(new Date()));
     setTimeout(() => _setSyncStatus('idle', ''), 3000);
   } catch(e) {
@@ -1441,13 +1442,11 @@ async function loadFromCloud() {
       }
       // db を丸ごと置き換えず、中身だけ更新する（getterを維持するため）
       Object.keys(merged).forEach(k => { db[k] = merged[k]; });
-      // getter を再設定し、全dateを文字列に正規化
       reattachGetters();
       normalizeAllDates(db);
+      _ls.setItem(DB_KEY, JSON.stringify(db));
       _ls.setItem(SYNC_TS_KEY, new Date().toISOString());
-      if (db.company && db.company.name && db.company.name !== '本店' && db.company.name !== '') {
-        _ls.setItem('salonSetupDone', '1');
-      }
+      _ls.setItem('salonSetupDone', '1'); // 設定モーダル自動表示を常に抑制
       renderGreeting(); renderHome(); renderAlerts(); renderStoreSelectList();
       _setSyncStatus('ok', 'ロード完了 ' + _fmtTime(new Date()));
       setTimeout(() => _setSyncStatus('idle', ''), 3000);
@@ -1463,44 +1462,38 @@ async function loadFromCloud() {
 }
 // ---- ローカル優先マージ（日付が新しい方を採用） ----
 function mergeDB(local, remote) {
-  const merged = JSON.parse(JSON.stringify(local));
-  if (!merged.stores || merged.stores.length === 0) merged.stores = remote.stores;
+  // リモート（GAS）を正として店舗リストを採用 → 店舗の増減バグを解消
+  const merged = JSON.parse(JSON.stringify(remote));
 
-  // リモートにしかない店舗を追加（IDと名前の両方で重複チェック）
-  const localNames = new Set(merged.stores.map(s => s.name));
-  const localIds   = new Set(merged.stores.map(s => s.id));
-  (remote.stores || []).forEach(rs => {
-    if (localIds.has(rs.id))   return; // 同じIDは追加しない
-    if (localNames.has(rs.name)) return; // 同じ名前は追加しない
-    merged.stores.push(rs);
-    merged.storeData[rs.id] = (remote.storeData || {})[rs.id] || initStoreDataObj();
-  });
-
-  // IDの重複を念のため除去
+  // 店舗IDの重複を除去
   const seenIds = new Set();
-  merged.stores = merged.stores.filter(s => {
+  merged.stores = (remote.stores||[]).filter(s => {
     if (seenIds.has(s.id)) return false;
-    seenIds.add(s.id);
-    return true;
+    seenIds.add(s.id); return true;
   });
 
-  // 各店舗のデータをマージ
+  // storeDataはリモートをベースにローカルの新規操作をマージ（ローカル優先）
+  merged.storeData = merged.storeData || {};
   merged.stores.forEach(s => {
-    const ld = merged.storeData[s.id]   || initStoreDataObj();
-    const rd = (remote.storeData || {})[s.id] || initStoreDataObj();
+    const rd = (remote.storeData||{})[s.id] || initStoreDataObj();
+    const ld = (local.storeData||{})[s.id]  || initStoreDataObj();
     merged.storeData[s.id] = {
-      sales:             _mergeArr(ld.sales,             rd.sales),
-      expenses:          _mergeArr(ld.expenses,          rd.expenses),
-      inventory:         _mergeArr(ld.inventory,         rd.inventory),
-      staff:             _mergeArr(ld.staff,             rd.staff),
-      customPatterns:    _mergeArr(ld.customPatterns,    rd.customPatterns),
-      commissionHistory: _mergeArr(ld.commissionHistory, rd.commissionHistory),
+      sales:             _mergeArr(rd.sales,             ld.sales),
+      expenses:          _mergeArr(rd.expenses,          ld.expenses),
+      staff:             _mergeArr(rd.staff,             ld.staff),
+      customPatterns:    _mergeArr(rd.customPatterns,    ld.customPatterns),
+      commissionHistory: _mergeArr(rd.commissionHistory, ld.commissionHistory),
+      inventory:         [],
     };
   });
 
-  merged.companyExpenses = _mergeArr(local.companyExpenses || [], remote.companyExpenses || []);
-  merged.salesDetail  = { ...(remote.salesDetail  || {}), ...(local.salesDetail  || {}) };
-  merged.staffSummary = { ...(remote.staffSummary || {}), ...(local.staffSummary || {}) };
+  // companyExpensesはIDマージ（両端末のデータを保持）
+  merged.companyExpenses = _mergeArr(remote.companyExpenses||[], local.companyExpenses||[]);
+
+  // salesDetail・staffSummaryはローカル優先（CSV読込データ）
+  merged.salesDetail  = { ...(remote.salesDetail||{}),  ...(local.salesDetail||{})  };
+  merged.staffSummary = { ...(remote.staffSummary||{}), ...(local.staffSummary||{}) };
+
   return merged;
 }
 function _mergeArr(local, remote) {
