@@ -742,10 +742,16 @@
       <div style="background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;margin-bottom:14px">
         <div style="font-size:.78rem;font-weight:700;color:var(--gray3);letter-spacing:.06em;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
           <span>🏢 会社全体サマリー</span>
-          <div class="month-nav">
-            <button class="month-nav-btn" onclick="coChangeMonth(-1)">‹</button>
-            <span class="month-nav-label" id="co-month-label">—</span>
-            <button class="month-nav-btn" onclick="coChangeMonth(1)">›</button>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="display:inline-flex;border:1.5px solid var(--gray2);border-radius:20px;overflow:hidden">
+              <button id="co-view-month"  onclick="coSetView('month')"  style="border:none;cursor:pointer;font-size:.72rem;font-weight:700;padding:5px 12px;background:var(--peach);color:#fff">月別</button>
+              <button id="co-view-fiscal" onclick="coSetView('fiscal')" style="border:none;cursor:pointer;font-size:.72rem;font-weight:700;padding:5px 12px;color:var(--gray3)">年度</button>
+            </div>
+            <div class="month-nav">
+              <button class="month-nav-btn" onclick="coNav(-1)">‹</button>
+              <span class="month-nav-label" id="co-month-label">—</span>
+              <button class="month-nav-btn" onclick="coNav(1)">›</button>
+            </div>
           </div>
         </div>
         <div class="company-kpi-grid" id="co-kpi-grid">
@@ -760,6 +766,7 @@
           <div id="co-store-bars"></div>
         </div>
       </div>
+      <div id="co-breakdown" style="display:none"></div>
       <!-- 損益シミュレーター -->
       <div class="pl-page" style="background:var(--gray1);border-radius:var(--radius);padding:16px">
         <div class="pl-intro">💡 <b>損益計算（P/L）シミュレーター</b><br>売上・変動費・固定費を入力すると、今月が黒字か赤字かを自動計算します。</div>
@@ -1199,6 +1206,26 @@
         style="font-size:.82rem">
       <p style="font-size:.7rem;color:var(--gray3);margin-top:4px;line-height:1.6">
         銀行CSVの摘要にこのキーワードが含まれる出金行を自動除外します。既定キーワードに追加で設定できます。
+      </p>
+    </div>
+    <div class="form-row">
+      <label class="form-label">📅 期首月（年度の開始月）</label>
+      <select class="form-select" id="input-fy-start">
+        <option value="1">1月（暦年・1〜12月）</option>
+        <option value="2">2月</option>
+        <option value="3">3月</option>
+        <option value="4">4月（3月決算）</option>
+        <option value="5">5月</option>
+        <option value="6">6月</option>
+        <option value="7">7月</option>
+        <option value="8">8月</option>
+        <option value="9">9月</option>
+        <option value="10">10月（9月決算）</option>
+        <option value="11">11月</option>
+        <option value="12">12月</option>
+      </select>
+      <p style="font-size:.7rem;color:var(--gray3);margin-top:4px;line-height:1.6">
+        会社全体サマリーの「年度」表示で使う開始月です。決算月の翻月を選びます（例：9月決算 → 10月）。暦年で見るなら1月。
       </p>
     </div>
     <div class="modal-actions">
@@ -2181,6 +2208,7 @@ function openSettings() {
   document.getElementById('input-store-name').value = db.company.name||'';
   document.getElementById('input-owner-name').value = db.company.ownerName||'';
   document.getElementById('input-card-exclude-kw').value = (db.company.cardExcludeKw||[]).join(',');
+  const _fyEl = document.getElementById('input-fy-start'); if (_fyEl) _fyEl.value = String((db.company.fyStartMonth)||1);
   openModal('settings-modal');
 }
 function saveSettings() {
@@ -2191,12 +2219,14 @@ function saveSettings() {
   // カード除外キーワード保存
   const kwRaw = document.getElementById('input-card-exclude-kw').value;
   db.company.cardExcludeKw = kwRaw.split(',').map(s=>s.trim()).filter(s=>s.length>0);
+  const _fyEl = document.getElementById('input-fy-start'); if (_fyEl) db.company.fyStartMonth = parseInt(_fyEl.value)||1;
+  coFY = null;
   // 1店舗かつ店舗名が会社名と同じだった場合のみ同期
   if (db.stores.length === 1 && db.stores[0].name === oldName) {
     db.stores[0].name = newName || '本店';
   }
   _ls.setItem('salonSetupDone', '1');
-  saveDB(); closeModal('settings-modal'); renderGreeting(); renderHome();
+  saveDB(); closeModal('settings-modal'); renderGreeting(); renderHome(); renderCompany();
 }
 function renderDate() {
   document.getElementById('today-date').textContent =
@@ -3762,6 +3792,18 @@ function expRenderAll() {
   }).join('');
 }
 let coMonth = (() => { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
+let coView = 'month';   // 'month' | 'fiscal'
+let coFY   = null;      // 会計年度の期首年
+function fyStartMonth() { const v = parseInt(db.company && db.company.fyStartMonth); return (v>=1 && v<=12) ? v : 1; }
+function fyOf(ym) { const [y,m] = ym.split('-').map(Number); return m >= fyStartMonth() ? y : y-1; }
+function fyMonths(fy) { const st=fyStartMonth(); const out=[]; for(let i=0;i<12;i++){ const idx=(st-1)+i; out.push(`${fy+Math.floor(idx/12)}-${String(idx%12+1).padStart(2,'0')}`);} return out; }
+function fyLabel(fy) { const st=fyStartMonth(); if(st===1) return `${fy}年`; const ms=fyMonths(fy); return `${fy}年度（${ms[0].replace('-','/')}〜${ms[11].replace('-','/')}）`; }
+function coSetView(v) { coView=v; if(coFY===null) coFY=fyOf(coMonth); renderCompany(); }
+function coNav(d) {
+  if (coView==='fiscal') { if(coFY===null) coFY=fyOf(coMonth); coFY+=d; }
+  else { const [y,m]=coMonth.split('-').map(Number); const dt=new Date(y,m-1+d,1); coMonth=`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}`; }
+  renderCompany();
+}
 function coChangeMonth(d) {
   const [y,m] = coMonth.split('-').map(Number);
   const dt = new Date(y, m-1+d, 1);
@@ -3777,21 +3819,29 @@ function showCoTab(tab, skipRender) {
   if(tab==='stores') showManageSubTab('store');
 }
 function renderCoSummary() {
-  const ym = coMonth;
+  if (coFY === null) coFY = fyOf(coMonth);
+  const fiscal = coView === 'fiscal';
+  const inScope = (d) => { const ym = dateStr(d).slice(0,7); if (ym.length < 7) return false; return fiscal ? (fyOf(ym)===coFY) : (ym===coMonth); };
   const _coLbl = document.getElementById('co-month-label');
-  if (_coLbl) { const [_cy,_cm] = coMonth.split('-'); _coLbl.textContent = `${_cy}年${parseInt(_cm)}月`; }
+  if (_coLbl) { _coLbl.textContent = fiscal ? fyLabel(coFY) : (() => { const [_cy,_cm]=coMonth.split('-'); return `${_cy}年${parseInt(_cm)}月`; })(); }
+  const _vm = document.getElementById('co-view-month'), _vf = document.getElementById('co-view-fiscal');
+  if (_vm && _vf) {
+    const base='border:none;cursor:pointer;font-size:.72rem;font-weight:700;padding:5px 12px;';
+    _vm.style.cssText = base + (fiscal ? 'color:var(--gray3)' : 'background:var(--peach);color:#fff');
+    _vf.style.cssText = base + (fiscal ? 'background:var(--peach);color:#fff' : 'color:var(--gray3)');
+  }
   let totalSales = 0, totalStaff = 0;
   const storeSales = db.stores.map(s => {
     const sd = db.storeData[s.id] || initStoreDataObj();
-    const sal = sd.sales.filter(r=>dateStr(r.date).startsWith(ym)).reduce((a,r)=>a+(r.amount||0),0);
+    const sal = sd.sales.filter(r=>inScope(r.date)).reduce((a,r)=>a+(r.amount||0),0);
     totalSales += sal;
     totalStaff += sd.staff.length;
     return { store:s, sales:sal };
   });
-  const companyExp = db.companyExpenses.filter(e=>dateStr(e.date).startsWith(ym)).reduce((a,e)=>a+(e.amount||0),0);
+  const companyExp = db.companyExpenses.filter(e=>inScope(e.date)).reduce((a,e)=>a+(e.amount||0),0);
   const profit = totalSales - companyExp;
   document.getElementById('co-kpi-sales').textContent   = fmtYen(totalSales);
-  document.getElementById('co-kpi-sales-sub').textContent = `${db.stores.length}店舗合計`;
+  document.getElementById('co-kpi-sales-sub').textContent = fiscal ? `${db.stores.length}店舗・年計` : `${db.stores.length}店舗合計`;
   document.getElementById('co-kpi-exp').textContent     = fmtYen(companyExp);
   document.getElementById('co-kpi-profit').textContent  = fmtYen(profit);
   document.getElementById('co-kpi-stores').textContent  = db.stores.length;
@@ -3813,6 +3863,39 @@ function renderCoSummary() {
         </div>
       </div>`).join('')
     : '<p style="color:var(--gray3);font-size:.82rem;text-align:center;padding:16px">店舗が登録されていません</p>';
+  renderCoBreakdown(fiscal);
+}
+function renderCoBreakdown(fiscal) {
+  const bd = document.getElementById('co-breakdown');
+  if (!bd) return;
+  if (!fiscal) { bd.style.display='none'; bd.innerHTML=''; return; }
+  const months = fyMonths(coFY);
+  const rows = months.map(ym => {
+    const sales = db.stores.reduce((a,s)=>{ const sd=db.storeData[s.id]||initStoreDataObj(); return a + sd.sales.filter(r=>dateStr(r.date).slice(0,7)===ym).reduce((x,r)=>x+(r.amount||0),0); },0);
+    const exp = db.companyExpenses.filter(e=>dateStr(e.date).slice(0,7)===ym).reduce((a,e)=>a+(e.amount||0),0);
+    return { ym, sales, exp, profit: sales-exp };
+  });
+  const tS = rows.reduce((a,r)=>a+r.sales,0), tE = rows.reduce((a,r)=>a+r.exp,0), tP = tS-tE;
+  bd.style.display='';
+  bd.innerHTML = `
+    <div style="background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;margin-bottom:14px">
+      <div style="font-size:.78rem;font-weight:700;color:var(--gray3);margin-bottom:12px">\u{1F4C5} ${esc(fyLabel(coFY))} \u6708\u6b21\u63a8\u79fb</div>
+      <div style="overflow-x:auto"><table class="exp-table" style="width:100%;font-size:.8rem">
+        <thead><tr><th>\u6708</th><th style="text-align:right">\u58f2\u4e0a</th><th style="text-align:right">\u7d4c\u8cbb</th><th style="text-align:right">\u5229\u76ca</th></tr></thead>
+        <tbody>${rows.map(r=>{ const [yy,mm]=r.ym.split('-'); return `<tr>
+          <td style="white-space:nowrap">${yy}/${parseInt(mm)}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums">${fmtYen(r.sales)}</td>
+          <td style="text-align:right;font-variant-numeric:tabular-nums;color:var(--coral)">${fmtYen(r.exp)}</td>
+          <td style="text-align:right;font-weight:700;font-variant-numeric:tabular-nums;color:${r.profit>=0?'var(--sage)':'var(--coral)'}">${fmtYen(r.profit)}</td>
+        </tr>`; }).join('')}</tbody>
+        <tfoot><tr style="border-top:2px solid var(--gray2);font-weight:800">
+          <td>\u5e74\u8a08</td>
+          <td style="text-align:right;color:var(--rose)">${fmtYen(tS)}</td>
+          <td style="text-align:right;color:var(--coral)">${fmtYen(tE)}</td>
+          <td style="text-align:right;color:${tP>=0?'var(--sage)':'var(--coral)'}">${fmtYen(tP)}</td>
+        </tr></tfoot>
+      </table></div>
+    </div>`;
 }
 function renderCoExpenses() {
   const ym = coMonth;
