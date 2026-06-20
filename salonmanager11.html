@@ -745,7 +745,7 @@
           <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <div style="display:inline-flex;border:1.5px solid var(--gray2);border-radius:20px;overflow:hidden">
               <button id="co-view-month"  onclick="coSetView('month')"  style="border:none;cursor:pointer;font-size:.72rem;font-weight:700;padding:5px 12px;background:var(--peach);color:#fff">月別</button>
-              <button id="co-view-fiscal" onclick="coSetView('fiscal')" style="border:none;cursor:pointer;font-size:.72rem;font-weight:700;padding:5px 12px;color:var(--gray3)">年度</button>
+              <button id="co-view-fiscal" onclick="coSetView('fiscal')" style="border:none;cursor:pointer;font-size:.72rem;font-weight:700;padding:5px 12px;color:var(--gray3)">年間</button>
             </div>
             <div class="month-nav">
               <button class="month-nav-btn" onclick="coNav(-1)">‹</button>
@@ -1225,7 +1225,7 @@
         <option value="12">12月</option>
       </select>
       <p style="font-size:.7rem;color:var(--gray3);margin-top:4px;line-height:1.6">
-        会社全体サマリーの「年度」表示で使う開始月です。決算月の翻月を選びます（例：9月決算 → 10月）。暦年で見るなら1月。
+        会社全体サマリーの「年間」表示で使う開始月です。決算月の翌月を選びます（例：9月決算 → 10月）。暦年で見るなら1月。
       </p>
     </div>
     <div class="modal-actions">
@@ -2208,7 +2208,7 @@ function openSettings() {
   document.getElementById('input-store-name').value = db.company.name||'';
   document.getElementById('input-owner-name').value = db.company.ownerName||'';
   document.getElementById('input-card-exclude-kw').value = (db.company.cardExcludeKw||[]).join(',');
-  const _fyEl = document.getElementById('input-fy-start'); if (_fyEl) _fyEl.value = String((db.company.fyStartMonth)||1);
+  const _fyEl = document.getElementById('input-fy-start'); if (_fyEl) _fyEl.value = String((db.company.fyStartMonth)||10);
   openModal('settings-modal');
 }
 function saveSettings() {
@@ -3794,7 +3794,7 @@ function expRenderAll() {
 let coMonth = (() => { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`; })();
 let coView = 'month';   // 'month' | 'fiscal'
 let coFY   = null;      // 会計年度の期首年
-function fyStartMonth() { const v = parseInt(db.company && db.company.fyStartMonth); return (v>=1 && v<=12) ? v : 1; }
+function fyStartMonth() { const v = parseInt(db.company && db.company.fyStartMonth); return (v>=1 && v<=12) ? v : 10; }
 function fyOf(ym) { const [y,m] = ym.split('-').map(Number); return m >= fyStartMonth() ? y : y-1; }
 function fyMonths(fy) { const st=fyStartMonth(); const out=[]; for(let i=0;i<12;i++){ const idx=(st-1)+i; out.push(`${fy+Math.floor(idx/12)}-${String(idx%12+1).padStart(2,'0')}`);} return out; }
 function fyLabel(fy) { const st=fyStartMonth(); if(st===1) return `${fy}年`; const ms=fyMonths(fy); return `${fy}年度（${ms[0].replace('-','/')}〜${ms[11].replace('-','/')}）`; }
