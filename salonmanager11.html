@@ -730,66 +730,92 @@
   </div>
 </header>
 <nav id="tab-bar">
-  <button class="tab active" data-page="home"    onclick="switchTab(this)"><span class="tab-icon">🏠</span> ホーム</button>
+  <button class="tab active" data-page="company" onclick="switchTab(this)"><span class="tab-icon">🏢</span> 会社全体</button>
   <button class="tab"        data-page="sales"   onclick="switchTab(this)"><span class="tab-icon">💰</span> 売上・経費</button>
   <button class="tab"        data-page="staff"   onclick="switchTab(this)"><span class="tab-icon">👥</span> スタッフ</button>
   <button class="tab"        data-page="manage"  onclick="switchTab(this)"><span class="tab-icon">⚙️</span> 管理</button>
 </nav>
 <main id="main">
-  <div id="page-home" class="page active">
+  <div id="page-company" class="page active">
     <div id="home-alerts"></div>
-    <p class="home-greeting" id="greeting-text">こんにちは 👋</p>
-    <p class="home-sub" id="greeting-sub">今日も良い一日を。</p>
-    <div id="home-store-badge" style="display:inline-flex;align-items:center;gap:6px;background:var(--peach-l);border:1.5px solid var(--gray2);border-radius:20px;padding:4px 12px;font-size:.76rem;font-weight:700;color:var(--peach-d);margin-bottom:14px;cursor:pointer" onclick="openModal('store-select-modal')">
-      <span id="home-store-dot" style="width:8px;height:8px;border-radius:50%;background:var(--peach);display:inline-block"></span>
-      <span id="home-store-name">—</span> の今月 ▾
-    </div>
-    <div class="kpi-grid">
-      <div class="kpi-card green" onclick="switchTabById('sales')">
-        <div class="kpi-label">💰 今月の売上</div>
-        <div class="kpi-value" id="kpi-sales">¥0</div>
-        <div class="kpi-diff" id="kpi-sales-diff">データなし</div>
+      <!-- 会社全体サマリー -->
+      <div style="background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;margin-bottom:14px">
+        <div style="font-size:.78rem;font-weight:700;color:var(--gray3);letter-spacing:.06em;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+          <span>🏢 会社全体サマリー</span>
+          <div class="month-nav">
+            <button class="month-nav-btn" onclick="coChangeMonth(-1)">‹</button>
+            <span class="month-nav-label" id="co-month-label">—</span>
+            <button class="month-nav-btn" onclick="coChangeMonth(1)">›</button>
+          </div>
+        </div>
+        <div class="company-kpi-grid" id="co-kpi-grid">
+          <div class="company-kpi rose"><div class="company-kpi-label">💰 全店売上合計</div><div class="company-kpi-value" id="co-kpi-sales">¥0</div><div class="company-kpi-sub" id="co-kpi-sales-sub">—</div></div>
+          <div class="company-kpi coral"><div class="company-kpi-label">📋 経費合計</div><div class="company-kpi-value" id="co-kpi-exp">¥0</div><div class="company-kpi-sub">会社全体</div></div>
+          <div class="company-kpi amber"><div class="company-kpi-label">✨ 会社利益</div><div class="company-kpi-value" id="co-kpi-profit">¥0</div><div class="company-kpi-sub">売上 − 経費</div></div>
+          <div class="company-kpi sky"><div class="company-kpi-label">🏪 店舗数</div><div class="company-kpi-value" id="co-kpi-stores">0</div><div class="company-kpi-sub">登録済み</div></div>
+          <div class="company-kpi sage"><div class="company-kpi-label">👥 総スタッフ数</div><div class="company-kpi-value" id="co-kpi-staff">0</div><div class="company-kpi-sub">全店合計</div></div>
+        </div>
+        <div style="margin-top:14px">
+          <div style="font-size:.78rem;font-weight:700;color:var(--gray3);margin-bottom:10px">📊 店舗別 売上構成</div>
+          <div id="co-store-bars"></div>
+        </div>
       </div>
-      <div class="kpi-card red" onclick="switchTabById('expenses')">
-        <div class="kpi-label">📋 今月の経費</div>
-        <div class="kpi-value" id="kpi-exp">¥0</div>
-        <div class="kpi-diff">データなし</div>
+      <!-- 損益シミュレーター -->
+      <div class="pl-page" style="background:var(--gray1);border-radius:var(--radius);padding:16px">
+        <div class="pl-intro">💡 <b>損益計算（P/L）シミュレーター</b><br>売上・変動費・固定費を入力すると、今月が黒字か赤字かを自動計算します。</div>
+        <div class="pl-input-card">
+          <div class="pl-input-title">📈 売上高</div>
+          <div class="pl-field"><label>今月の売上合計（税込）</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-sales" type="number" min="0" placeholder="例：1,000,000" oninput="plRecalc()"></div></div>
+        </div>
+        <div class="pl-input-card">
+          <div class="pl-input-title">📦 変動費</div>
+          <div class="pl-field"><label>材料費・仕入れ原価（税込）</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-cogs" type="number" min="0" placeholder="例：200,000" oninput="plRecalc()"></div></div>
+          <div class="pl-field"><label>業務委託費（外注費）</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-subcon" type="number" min="0" placeholder="例：300,000" oninput="plRecalc()"></div></div>
+          <div class="pl-field"><label>広告・集客費</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-ad" type="number" min="0" placeholder="例：50,000" oninput="plRecalc()"></div></div>
+        </div>
+        <div class="pl-input-card">
+          <div class="pl-input-title">🏢 固定費</div>
+          <div class="pl-field"><label>家賃・リース料</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-rent" type="number" min="0" placeholder="例：150,000" oninput="plRecalc()"></div></div>
+          <div class="pl-field"><label>通信費・サブスク</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-comm" type="number" min="0" placeholder="例：30,000" oninput="plRecalc()"></div></div>
+          <div class="pl-field"><label>その他固定費</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-other-fixed" type="number" min="0" placeholder="例：50,000" oninput="plRecalc()"></div></div>
+        </div>
+        <div id="pl-bep-banner" style="display:none;background:var(--sky-l);border:1.5px solid var(--sky);border-radius:var(--radius);padding:12px 16px;margin-bottom:14px;font-size:.82rem;color:#1565c0"></div>
+        <div id="pl-result-cards" style="display:none">
+          <div class="pl-result-card" id="pl-result-card">
+            <div class="pl-result-row"><span>売上高</span><span class="pl-result-val" id="pl-r-sales">¥0</span></div>
+            <div class="pl-result-row"><span>変動費合計</span><span class="pl-result-val" id="pl-r-var">¥0</span></div>
+            <div class="pl-result-row"><span>限界利益</span><span class="pl-result-val" id="pl-r-margin">¥0</span></div>
+            <div class="pl-result-row"><span>限界利益率</span><span class="pl-result-val" id="pl-r-margin-pct">0%</span></div>
+            <div class="pl-result-row"><span>固定費合計</span><span class="pl-result-val" id="pl-r-fixed">¥0</span></div>
+            <div class="pl-result-row total" id="pl-r-profit-card"><span>営業利益</span><span class="pl-result-val" id="pl-r-profit">¥0</span><span class="pl-result-pct" id="pl-r-profit-pct"></span></div>
+            <div class="pl-result-row"><span>損益分岐点売上</span><span class="pl-result-val" id="pl-r-bep">¥0</span></div>
+          </div>
+        </div>
+        <div id="pl-waterfall" style="display:none;margin:14px 0">
+          <div class="wf-row"><span class="wf-label">売上高</span><div class="wf-bar-wrap"><div class="wf-bar green" id="wf-sales-bar"></div></div><span class="wf-val" id="wf-sales-val"></span></div>
+          <div class="wf-row"><span class="wf-label">変動費</span><div class="wf-bar-wrap"><div class="wf-bar red" id="wf-var-bar"></div></div><span class="wf-val" id="wf-var-val"></span></div>
+          <div class="wf-row"><span class="wf-label">限界利益</span><div class="wf-bar-wrap"><div class="wf-bar sky" id="wf-margin-bar"></div></div><span class="wf-val" id="wf-margin-val"></span></div>
+          <div class="wf-row"><span class="wf-label">固定費</span><div class="wf-bar-wrap"><div class="wf-bar amber" id="wf-fix-bar"></div></div><span class="wf-val" id="wf-fix-val"></span></div>
+          <div class="wf-row"><span class="wf-label">営業利益</span><div class="wf-bar-wrap"><div class="wf-bar" id="wf-profit-bar"></div></div><span class="wf-val" id="wf-profit-val"><span id="wf-profit-label"></span></span></div>
+        </div>
+        <div class="gauge-wrap" id="pl-gauge-wrap" style="display:none">
+          <div class="gauge-label-row"><span id="gauge-min-label">¥0</span><span id="gauge-mid-label">損益分岐点</span><span id="gauge-max-label">—</span></div>
+          <div class="gauge-track">
+            <div class="gauge-fill" id="gauge-fill"></div>
+            <div class="gauge-pointer" id="gauge-pointer"></div>
+            <div class="gauge-bep-line" id="gauge-bep-line" style="display:none"></div>
+            <div class="gauge-bep-label" id="gauge-bep-label" style="display:none"></div>
+          </div>
+          <div class="gauge-note" id="gauge-note"></div>
+          <div class="pl-hint" id="pl-hint" style="display:none"></div>
+        </div>
       </div>
-      <div class="kpi-card gold">
-        <div class="kpi-label">✨ 今月の利益</div>
-        <div class="kpi-value" id="kpi-profit">¥0</div>
-        <div class="kpi-diff">売上 − 経費</div>
-      </div>
-      <div class="kpi-card navy" onclick="switchTabById('staff')">
-        <div class="kpi-label">👥 スタッフ数</div>
-        <div class="kpi-value" id="kpi-staff">0</div>
-        <div class="kpi-diff">登録済み</div>
-      </div>
-    </div>
-    <div class="section-title">クイックアクション</div>
-    <div class="quick-actions">
-      <button class="qa-btn" onclick="switchTabById('sales'); setTimeout(()=>showSalesSubTab('upload'),100)"><span class="qa-icon">💰</span>売上を読込</button>
-      <button class="qa-btn" onclick="switchTabById('sales'); setTimeout(()=>showSalesSubTab('expense'),100)"><span class="qa-icon">📋</span>経費を読込</button>
-      <button class="qa-btn" onclick="switchTabById('staff'); setTimeout(()=>showStaffSubTab('calc'),100)"><span class="qa-icon">🧮</span>報酬を計算</button>
-      <button class="qa-btn" onclick="switchTabById('manage'); setTimeout(()=>showManageSubTab('biz'),100)"><span class="qa-icon">📅</span>手続きカレンダー</button>
-      <button class="qa-btn" onclick="switchTabById('manage'); setTimeout(()=>showManageSubTab('biz'),100)"><span class="qa-icon">✅</span>委託チェックリスト</button>
-      <button class="qa-btn" onclick="switchTabById('sales'); setTimeout(()=>showSalesSubTab('report'),100)"><span class="qa-icon">📊</span>損益シミュレーター</button>
-    </div>
-    <div class="section-title">最近の記録</div>
-    <div class="activity-list" id="activity-list">
-      <div class="activity-item">
-        <div class="activity-dot gold"></div>
-        <div class="activity-text">まだ記録がありません</div>
-        <div class="activity-time">—</div>
-      </div>
-    </div>
   </div>
   <!-- ===== 売上・経費ページ ===== -->
   <div id="page-sales" class="page">
     <div class="staff-tabs" style="margin-bottom:16px">
       <button class="staff-tab active" id="stab-sales-upload"  onclick="showSalesSubTab('upload')">💰 売上読込</button>
       <button class="staff-tab"        id="stab-sales-expense" onclick="showSalesSubTab('expense')">📋 経費読込</button>
-      <button class="staff-tab"        id="stab-sales-report"  onclick="showSalesSubTab('report')">📊 月次サマリー</button>
     </div>
 
     <!-- 売上読込サブタブ -->
@@ -963,80 +989,6 @@
     </div>
 
     <!-- 月次サマリーサブタブ -->
-    <div id="ssub-sales-report" style="display:none">
-      <!-- 会社全体サマリー -->
-      <div style="background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;margin-bottom:14px">
-        <div style="font-size:.78rem;font-weight:700;color:var(--gray3);letter-spacing:.06em;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
-          <span>🏢 会社全体サマリー</span>
-          <div class="month-nav">
-            <button class="month-nav-btn" onclick="coChangeMonth(-1)">‹</button>
-            <span class="month-nav-label" id="co-month-label">—</span>
-            <button class="month-nav-btn" onclick="coChangeMonth(1)">›</button>
-          </div>
-        </div>
-        <div class="company-kpi-grid" id="co-kpi-grid">
-          <div class="company-kpi rose"><div class="company-kpi-label">💰 全店売上合計</div><div class="company-kpi-value" id="co-kpi-sales">¥0</div><div class="company-kpi-sub" id="co-kpi-sales-sub">—</div></div>
-          <div class="company-kpi coral"><div class="company-kpi-label">📋 経費合計</div><div class="company-kpi-value" id="co-kpi-exp">¥0</div><div class="company-kpi-sub">会社全体</div></div>
-          <div class="company-kpi amber"><div class="company-kpi-label">✨ 会社利益</div><div class="company-kpi-value" id="co-kpi-profit">¥0</div><div class="company-kpi-sub">売上 − 経費</div></div>
-          <div class="company-kpi sky"><div class="company-kpi-label">🏪 店舗数</div><div class="company-kpi-value" id="co-kpi-stores">0</div><div class="company-kpi-sub">登録済み</div></div>
-          <div class="company-kpi sage"><div class="company-kpi-label">👥 総スタッフ数</div><div class="company-kpi-value" id="co-kpi-staff">0</div><div class="company-kpi-sub">全店合計</div></div>
-        </div>
-        <div style="margin-top:14px">
-          <div style="font-size:.78rem;font-weight:700;color:var(--gray3);margin-bottom:10px">📊 店舗別 売上構成</div>
-          <div id="co-store-bars"></div>
-        </div>
-      </div>
-      <!-- 損益シミュレーター -->
-      <div class="pl-page" style="background:var(--gray1);border-radius:var(--radius);padding:16px">
-        <div class="pl-intro">💡 <b>損益計算（P/L）シミュレーター</b><br>売上・変動費・固定費を入力すると、今月が黒字か赤字かを自動計算します。</div>
-        <div class="pl-input-card">
-          <div class="pl-input-title">📈 売上高</div>
-          <div class="pl-field"><label>今月の売上合計（税込）</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-sales" type="number" min="0" placeholder="例：1,000,000" oninput="plRecalc()"></div></div>
-        </div>
-        <div class="pl-input-card">
-          <div class="pl-input-title">📦 変動費</div>
-          <div class="pl-field"><label>材料費・仕入れ原価（税込）</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-cogs" type="number" min="0" placeholder="例：200,000" oninput="plRecalc()"></div></div>
-          <div class="pl-field"><label>業務委託費（外注費）</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-subcon" type="number" min="0" placeholder="例：300,000" oninput="plRecalc()"></div></div>
-          <div class="pl-field"><label>広告・集客費</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-ad" type="number" min="0" placeholder="例：50,000" oninput="plRecalc()"></div></div>
-        </div>
-        <div class="pl-input-card">
-          <div class="pl-input-title">🏢 固定費</div>
-          <div class="pl-field"><label>家賃・リース料</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-rent" type="number" min="0" placeholder="例：150,000" oninput="plRecalc()"></div></div>
-          <div class="pl-field"><label>通信費・サブスク</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-comm" type="number" min="0" placeholder="例：30,000" oninput="plRecalc()"></div></div>
-          <div class="pl-field"><label>その他固定費</label><div class="pl-input-wrap"><span class="pl-prefix">¥</span><input class="pl-input has-prefix" id="pl-other-fixed" type="number" min="0" placeholder="例：50,000" oninput="plRecalc()"></div></div>
-        </div>
-        <div id="pl-bep-banner" style="display:none;background:var(--sky-l);border:1.5px solid var(--sky);border-radius:var(--radius);padding:12px 16px;margin-bottom:14px;font-size:.82rem;color:#1565c0"></div>
-        <div id="pl-result-cards" style="display:none">
-          <div class="pl-result-card" id="pl-result-card">
-            <div class="pl-result-row"><span>売上高</span><span class="pl-result-val" id="pl-r-sales">¥0</span></div>
-            <div class="pl-result-row"><span>変動費合計</span><span class="pl-result-val" id="pl-r-var">¥0</span></div>
-            <div class="pl-result-row"><span>限界利益</span><span class="pl-result-val" id="pl-r-margin">¥0</span></div>
-            <div class="pl-result-row"><span>限界利益率</span><span class="pl-result-val" id="pl-r-margin-pct">0%</span></div>
-            <div class="pl-result-row"><span>固定費合計</span><span class="pl-result-val" id="pl-r-fixed">¥0</span></div>
-            <div class="pl-result-row total" id="pl-r-profit-card"><span>営業利益</span><span class="pl-result-val" id="pl-r-profit">¥0</span><span class="pl-result-pct" id="pl-r-profit-pct"></span></div>
-            <div class="pl-result-row"><span>損益分岐点売上</span><span class="pl-result-val" id="pl-r-bep">¥0</span></div>
-          </div>
-        </div>
-        <div id="pl-waterfall" style="display:none;margin:14px 0">
-          <div class="wf-row"><span class="wf-label">売上高</span><div class="wf-bar-wrap"><div class="wf-bar green" id="wf-sales-bar"></div></div><span class="wf-val" id="wf-sales-val"></span></div>
-          <div class="wf-row"><span class="wf-label">変動費</span><div class="wf-bar-wrap"><div class="wf-bar red" id="wf-var-bar"></div></div><span class="wf-val" id="wf-var-val"></span></div>
-          <div class="wf-row"><span class="wf-label">限界利益</span><div class="wf-bar-wrap"><div class="wf-bar sky" id="wf-margin-bar"></div></div><span class="wf-val" id="wf-margin-val"></span></div>
-          <div class="wf-row"><span class="wf-label">固定費</span><div class="wf-bar-wrap"><div class="wf-bar amber" id="wf-fix-bar"></div></div><span class="wf-val" id="wf-fix-val"></span></div>
-          <div class="wf-row"><span class="wf-label">営業利益</span><div class="wf-bar-wrap"><div class="wf-bar" id="wf-profit-bar"></div></div><span class="wf-val" id="wf-profit-val"><span id="wf-profit-label"></span></span></div>
-        </div>
-        <div class="gauge-wrap" id="pl-gauge-wrap" style="display:none">
-          <div class="gauge-label-row"><span id="gauge-min-label">¥0</span><span id="gauge-mid-label">損益分岐点</span><span id="gauge-max-label">—</span></div>
-          <div class="gauge-track">
-            <div class="gauge-fill" id="gauge-fill"></div>
-            <div class="gauge-pointer" id="gauge-pointer"></div>
-            <div class="gauge-bep-line" id="gauge-bep-line" style="display:none"></div>
-            <div class="gauge-bep-label" id="gauge-bep-label" style="display:none"></div>
-          </div>
-          <div class="gauge-note" id="gauge-note"></div>
-          <div class="pl-hint" id="pl-hint" style="display:none"></div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- ===== スタッフページ ===== -->
@@ -1585,7 +1537,7 @@ function normalizeAllDates(d) {
     if (r.amount != null) r.amount = Number(r.amount) || 0;
     return r;
   };
-  (d.companyExpenses || []).forEach(fixRec);
+  (d.companyExpenses || []).forEach(r => { fixRec(r); if (r.date) r.date = normalizeCardDate(r.date); });
   Object.values(d.storeData || {}).forEach(sd => {
     (sd.sales     || []).forEach(fixRec);
     (sd.expenses  || []).forEach(fixRec);
@@ -2128,13 +2080,12 @@ function showStaffSubTab(tab) {
   if (tab==='all')     renderAllStaffView();
 }
 function showSalesSubTab(id) {
-  ['upload','expense','report'].forEach(t => {
+  ['upload','expense'].forEach(t => {
     document.getElementById('ssub-sales-'+t).style.display = t===id?'block':'none';
     const btn = document.getElementById('stab-sales-'+t);
     if(btn) btn.classList.toggle('active', t===id);
   });
   if(id==='expense') { expInitMonth(); expRenderAll(); }
-  if(id==='report')  { renderCoSummary(); }
   ['store','biz','backup'].forEach(t => {
     document.getElementById('msub-'+t).style.display = t===id?'block':'none';
     const btn = document.getElementById('stab-manage-'+t);
@@ -2187,6 +2138,7 @@ function updateCalcStaffSelect() {
   if (cur) onCalcStaffChange();
 }
 function renderHome() {
+  if (!document.getElementById('kpi-sales')) return;
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const monthlySales = db.sales.filter(s=>s.date&&dateStr(s.date).startsWith(ym)).reduce((a,s)=>a+(s.amount||0),0);
@@ -2216,7 +2168,7 @@ function switchTab(btn) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('page-'+btn.dataset.page).classList.add('active');
-  if (btn.dataset.page==='home')   { renderHome(); renderAlerts(); }
+  if (btn.dataset.page==='company') { renderCoSummary(); renderAlerts(); }
   if (btn.dataset.page==='sales')  { salesInitMonth(); renderSalesStaffCards(document.getElementById('sales-target-month')?.value||''); }
   if (btn.dataset.page==='staff')  { showStaffSubTab('list'); }
   if (btn.dataset.page==='manage') { showManageSubTab('store'); }
@@ -2254,8 +2206,8 @@ function renderGreeting() {
   const h = new Date().getHours();
   const g = h<11?'おはようございます ☀️':h<17?'こんにちは 👋':'お疲れ様です 🌙';
   const owner = db.company.ownerName ? `、${db.company.ownerName}さん` : '';
-  document.getElementById('greeting-text').textContent = `${g}${owner}`;
-  document.getElementById('greeting-sub').textContent  = `${db.company.name||'会社'} の今日もよろしくお願いします。`;
+  const _gt = document.getElementById('greeting-text'); if (_gt) _gt.textContent = `${g}${owner}`;
+  const _gs = document.getElementById('greeting-sub'); if (_gs) _gs.textContent = `${db.company.name||'会社'} の今日もよろしくお願いします。`;
   const store = activeStore();
   const swName = document.getElementById('sw-name');
   const swDot  = document.getElementById('sw-dot');
@@ -3405,7 +3357,7 @@ function parseBankCSV(text) {
         return;
       }
       expRows.push({
-        date:   ci.date>=0 ? (row[ci.date]||'').trim() : '',
+        date:   ci.date>=0 ? normalizeCardDate(row[ci.date]||'') : '',
         desc:   desc.trim(),
         amount: out,
         source: 'bank-csv',
@@ -3541,7 +3493,12 @@ function expClearBankCSV() {
 // ---- カードCSV日付正規化 ----
 function normalizeCardDate(raw) {
   if (!raw) return '';
-  let s = raw.trim();
+  let s = String(raw).trim();
+  // YYYYMMDD（8桁）
+  if (/^\d{8}$/.test(s)) return `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`;
+  // YYYY.MM.DD（ドット区切り）
+  let _md = s.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})/);
+  if (_md) return `${_md[1]}-${_md[2].padStart(2,'0')}-${_md[3].padStart(2,'0')}`;
   // YYYY/MM/DD or YYYY-MM-DD
   let m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
   if (m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
@@ -3821,6 +3778,8 @@ function showCoTab(tab, skipRender) {
 }
 function renderCoSummary() {
   const ym = coMonth;
+  const _coLbl = document.getElementById('co-month-label');
+  if (_coLbl) { const [_cy,_cm] = coMonth.split('-'); _coLbl.textContent = `${_cy}年${parseInt(_cm)}月`; }
   let totalSales = 0, totalStaff = 0;
   const storeSales = db.stores.map(s => {
     const sd = db.storeData[s.id] || initStoreDataObj();
@@ -4205,8 +4164,8 @@ function init() {
   if (calcMonthEl && !calcMonthEl.value) calcMonthEl.value = ymNow;
 
   // ホームタブを確実にアクティブに
-  const homeBtn = document.querySelector('.tab[data-page="home"]');
-  if (homeBtn) switchTab(homeBtn);
+  const companyBtn = document.querySelector('.tab[data-page="company"]');
+  if (companyBtn) switchTab(companyBtn);
 
   // 設定モーダルは自動表示しない（⚙️ボタンから手動で開く）
 
